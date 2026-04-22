@@ -10,10 +10,9 @@
   "version": "1.0.0",
   "packages": [
     {
-      "registryType": "pypi",
-      "identifier": "utility-mcp-server",
+      "registryType": "oci",
+      "identifier": "docker.io/prakhargour10/utility-mcp-server:1.0.0",
       "version": "1.0.0",
-      "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"
       }

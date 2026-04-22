@@ -72,5 +72,9 @@ def get_share_price(company_name: str) -> str:
         return f"Error fetching share price for '{company_name}': {str(e)}"
 
 
-if __name__ == "__main__":
+def main():
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()

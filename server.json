@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.prakhargour10/utility-mcp-server",
+  "title": "Utility MCP Server",
+  "description": "MCP server providing IST time, IST date, and live share price lookup by company name.",
+  "repository": {
+    "url": "https://github.com/prakhargour10/utility-mcp-server",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "utility-mcp-server",
+      "version": "1.0.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

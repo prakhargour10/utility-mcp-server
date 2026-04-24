@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import yfinance as yf
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 # ---------------------------------------------------------------------------
 # Config
@@ -37,6 +38,14 @@ mcp = FastMCP(
     instructions=(
         "A utility MCP server providing IST time, date, stock prices, "
         "and Pine Labs SDK API documentation."
+    ),
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=[
+            "utility-mcp-server-production.up.railway.app",
+            "localhost:*",
+            "127.0.0.1:*",
+        ],
     ),
 )
 
@@ -134,21 +143,8 @@ async def get_api_documentation(api_name: str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------
 # ASGI app — used by uvicorn directly (endpoint: /mcp)
-# Health check injected as middleware to avoid breaking mcp_app lifespan
 # ---------------------------------------------------------------------------
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
-
-
-class HealthCheckMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        if request.url.path == "/" and request.method == "GET":
-            return JSONResponse({"status": "ok"})
-        return await call_next(request)
-
-
 app = mcp.streamable_http_app()
-app.add_middleware(HealthCheckMiddleware)
 
 
 # ---------------------------------------------------------------------------

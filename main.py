@@ -137,8 +137,8 @@ app = FastAPI(title="Utility MCP Server")
 def health():
     return {"status": "ok"}
 
-# Mount MCP server at /mcp
-app.mount("/mcp", mcp.streamable_http_app())
+# Mount MCP server at root (streamable_http_app already serves at /mcp internally)
+app.mount("/", mcp.streamable_http_app())
 
 
 # ---------------------------------------------------------------------------

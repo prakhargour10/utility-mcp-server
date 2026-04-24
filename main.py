@@ -135,7 +135,25 @@ async def get_api_documentation(api_name: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # ASGI app — used by uvicorn directly (endpoint: /mcp)
 # ---------------------------------------------------------------------------
-app = mcp.streamable_http_app()
+mcp_app = mcp.streamable_http_app()
+
+# Wrap with a health check at / for Railway
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+
+
+async def health(request: Request):
+    return JSONResponse({"status": "ok"})
+
+
+app = Starlette(
+    routes=[
+        Route("/", health),
+        Mount("/", app=mcp_app),
+    ]
+)
 
 
 # ---------------------------------------------------------------------------

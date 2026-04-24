@@ -134,26 +134,21 @@ async def get_api_documentation(api_name: str) -> dict[str, Any]:
 
 # ---------------------------------------------------------------------------
 # ASGI app — used by uvicorn directly (endpoint: /mcp)
+# Health check injected as middleware to avoid breaking mcp_app lifespan
 # ---------------------------------------------------------------------------
-mcp_app = mcp.streamable_http_app()
-
-# Wrap with a health check at / for Railway
-from starlette.applications import Starlette
-from starlette.requests import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
 
 
-async def health(request: Request):
-    return JSONResponse({"status": "ok"})
+class HealthCheckMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        if request.url.path == "/" and request.method == "GET":
+            return JSONResponse({"status": "ok"})
+        return await call_next(request)
 
 
-app = Starlette(
-    routes=[
-        Route("/", health),
-        Mount("/", app=mcp_app),
-    ]
-)
+app = mcp.streamable_http_app()
+app.add_middleware(HealthCheckMiddleware)
 
 
 # ---------------------------------------------------------------------------

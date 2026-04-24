@@ -1,13 +1,13 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.prakhargour10/utility-mcp-server",
-  "title": "Time, Date & Stock Price MCP Server",
-  "description": "Get current IST time, IST date, live stock prices, and Pine Labs SDK API documentation.",
+  "title": "Pine Labs SDK API Documentation MCP Server",
+  "description": "List and fetch official Pine Labs SDK API documentation via MCP tools.",
   "repository": {
     "url": "https://github.com/prakhargour10/utility-mcp-server",
     "source": "github"
   },
-  "version": "1.1.0",
+  "version": "1.2.0",
   "websiteUrl": "https://prakhargour10.github.io/utility-mcp-server",
   "packages": [
     {

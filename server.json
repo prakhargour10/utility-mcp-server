@@ -14,7 +14,8 @@
       "registryType": "oci",
       "identifier": "docker.io/prakhargour/utility-mcp-server:1.0.3",
       "transport": {
-        "type": "stdio"
+        "type": "http",
+        "url": "https://utility-mcp-server-production.up.railway.app/mcp"
       }
     }
   ]

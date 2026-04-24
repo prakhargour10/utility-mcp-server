@@ -56,19 +56,19 @@ def _discover_apis() -> dict[str, Path]:
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
-@mcp.tool()
+@mcp.tool(description="Returns the current time in IST (Indian Standard Time).")
 def get_current_time() -> str:
     now = datetime.now(IST)
     return now.strftime("%I:%M:%S %p IST")
 
 
-@mcp.tool()
+@mcp.tool(description="Returns the current date in IST (Indian Standard Time).")
 def get_current_date() -> str:
     now = datetime.now(IST)
     return now.strftime("%A, %d %B %Y")
 
 
-@mcp.tool()
+@mcp.tool(description="Returns the latest share price of a company by its name (e.g. 'Infosys', 'Apple', 'Pine Labs').")
 def get_share_price(company_name: str) -> str:
     try:
         results = yf.Search(company_name, max_results=5)
@@ -99,7 +99,10 @@ def get_share_price(company_name: str) -> str:
         return f"Error: {str(e)}"
 
 
-@mcp.tool(name="list_pinelabs_apis")
+@mcp.tool(
+    name="list_pinelabs_apis",
+    description="List all available Pine Labs SDK APIs grouped by category (e.g. 'transaction/doTransaction'). Call this first to discover valid api_name values for 'get_api_documentation'.",
+)
 async def list_pinelabs_apis() -> dict[str, Any]:
     apis = _discover_apis()
 
@@ -110,7 +113,10 @@ async def list_pinelabs_apis() -> dict[str, Any]:
     return {"content": [{"type": "text", "text": "\n".join(listing)}]}
 
 
-@mcp.tool(name="get_api_documentation")
+@mcp.tool(
+    name="get_api_documentation",
+    description="Fetch Pine Labs SDK documentation for a specific API. Use 'list_pinelabs_apis' first to discover available api_name values.",
+)
 async def get_api_documentation(api_name: str) -> dict[str, Any]:
     apis = _discover_apis()
 

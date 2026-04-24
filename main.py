@@ -14,7 +14,6 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import yfinance as yf
-from fastapi import FastAPI
 from mcp.server.fastmcp import FastMCP
 
 # ---------------------------------------------------------------------------
@@ -128,17 +127,9 @@ async def get_api_documentation(api_name: str) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# FastAPI App (IMPORTANT)
+# ASGI app — used by uvicorn directly (endpoint: /mcp)
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Utility MCP Server")
-
-# Health check (Railway needs this)
-@app.get("/")
-def health():
-    return {"status": "ok"}
-
-# Mount MCP server at root (streamable_http_app already serves at /mcp internally)
-app.mount("/", mcp.streamable_http_app())
+app = mcp.streamable_http_app()
 
 
 # ---------------------------------------------------------------------------

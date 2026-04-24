@@ -10,4 +10,6 @@ RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pyth
 COPY main.py .
 COPY api-docs/ api-docs/
 
+EXPOSE 8000
+
 ENTRYPOINT ["python", "main.py"]

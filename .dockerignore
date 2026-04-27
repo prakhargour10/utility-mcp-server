@@ -4,10 +4,13 @@ __pycache__
 venv
 .git
 .gitignore
+.env
+.env.example
 *.egg-info
 dist
 build
 mcp-publisher.exe
+tests/
 server.json
 pyproject.toml
 README.md

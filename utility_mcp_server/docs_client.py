@@ -35,11 +35,10 @@ logger = logging.getLogger(__name__)
 #
 # ``url-slug`` is the path segment under ``/api/`` on the docs site. We keep
 # it explicit because the docs site uses kebab-case slugs while api_name is
-# camelCase (e.g. ``checkStatus`` -> ``check-status``).
+# camelCase (e.g. ``doTransaction`` -> ``do-transaction``).
 API_REGISTRY: dict[str, tuple[str, str]] = {
     "init": ("lifecycle", "init"),
     "doTransaction": ("transaction", "do-transaction"),
-    "checkStatus": ("transaction", "check-status"),
 }
 
 
@@ -115,6 +114,16 @@ class PinelabsDocsClient:
     # -- lifecycle ----------------------------------------------------------
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    def close_sync(self) -> None:
+        """Best-effort sync close, safe to call from atexit handlers."""
+        if self._client.is_closed:
+            return
+        try:
+            asyncio.run(self._client.aclose())
+        except RuntimeError:
+            # Event loop is already running or closed; httpx will GC sockets.
+            pass
 
     # -- registry helpers ---------------------------------------------------
     def list_apis(self) -> list[ApiInfo]:

@@ -34,8 +34,8 @@ def _env_list(name: str, default: list[str]) -> list[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-# Repository root: <repo>/src/utility_mcp_server/config.py -> parents[2]
-REPO_ROOT: Path = Path(__file__).resolve().parents[2]
+# Repository root: <repo>/utility_mcp_server/config.py -> parents[1]
+REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -65,11 +65,11 @@ class Settings:
     )
 
     # SDK download artifacts (still served from local repo)
-    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "api-docs" / "sdk")
+    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "sdk")
     sdk_download_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "SDK_DOWNLOAD_BASE_URL",
-            "https://github.com/prakhargour10/utility-mcp-server/raw/main/api-docs/sdk",
+            "https://github.com/prakhargour10/utility-mcp-server/raw/main/sdk",
         ).rstrip("/")
     )
 

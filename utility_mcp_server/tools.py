@@ -1,19 +1,25 @@
-"""MCP tool definitions for Pine Labs API documentation."""
+"""All MCP tools for the utility server.
+
+Currently exposes:
+
+* ``list_pinelabs_apis`` — list available API names.
+* ``get_api_documentation`` — fetch live markdown for an API.
+* ``get_pinelabs_sdk_download_link`` — return public SDK download URL(s).
+"""
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from ..services.pinelabs_docs import (
-    DocsFetchError,
-    DocsNotFound,
-    PinelabsDocsClient,
-)
+from .docs_client import DocsFetchError, DocsNotFound, PinelabsDocsClient
 
 logger = logging.getLogger(__name__)
+
+_SDK_EXTENSIONS = {".aar", ".jar", ".zip", ".tar.gz", ".tgz", ".whl"}
 
 
 def _text_response(text: str) -> dict[str, Any]:
@@ -21,9 +27,35 @@ def _text_response(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}]}
 
 
-def register(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
-    """Register API documentation tools on the FastMCP server."""
+def _discover_sdks(sdk_dir: Path) -> list[Path]:
+    if not sdk_dir.exists():
+        return []
+    return sorted(
+        p
+        for p in sdk_dir.iterdir()
+        if p.is_file()
+        and (p.suffix.lower() in _SDK_EXTENSIONS or p.name.lower().endswith(".tar.gz"))
+    )
 
+
+# ---------------------------------------------------------------------------
+# Registration
+# ---------------------------------------------------------------------------
+def register(
+    mcp: FastMCP,
+    docs: PinelabsDocsClient,
+    sdk_dir: Path,
+    sdk_download_base_url: str,
+) -> None:
+    """Attach all tools to the FastMCP server."""
+    _register_api_docs(mcp, docs)
+    _register_sdk_download(mcp, sdk_dir, sdk_download_base_url)
+
+
+# ---------------------------------------------------------------------------
+# API documentation tools
+# ---------------------------------------------------------------------------
+def _register_api_docs(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
     @mcp.tool(
         name="list_pinelabs_apis",
         description=(
@@ -33,7 +65,6 @@ def register(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
         ),
     )
     async def list_pinelabs_apis() -> dict[str, Any]:
-        """Return the list of all available Pine SDK APIs, grouped by category."""
         logger.info("Tool invoked: list_pinelabs_apis")
         infos = docs.list_apis()
         if not infos:
@@ -66,7 +97,6 @@ def register(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
         ),
     )
     async def get_api_documentation(api_name: str) -> dict[str, Any]:
-        """Return the markdown documentation for the given Pine SDK API."""
         logger.info("Tool invoked: get_api_documentation(api_name=%r)", api_name)
         if not api_name or not api_name.strip():
             return _text_response("Error: 'api_name' is required and cannot be empty.")
@@ -109,3 +139,49 @@ def register(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
             "--- END DOCUMENTATION ---\n"
         )
         return _text_response(wrapped)
+
+
+# ---------------------------------------------------------------------------
+# SDK download tool
+# ---------------------------------------------------------------------------
+def _register_sdk_download(
+    mcp: FastMCP, sdk_dir: Path, download_base_url: str
+) -> None:
+    base = download_base_url.rstrip("/")
+
+    @mcp.tool(
+        name="get_pinelabs_sdk_download_link",
+        description=(
+            "Return the official download link(s) for the Pine Labs SDK "
+            "artifact(s) (e.g. the Android .aar). Use this whenever a "
+            "client asks where/how to download the Pine Labs SDK, the "
+            "AAR file, or the SDK binary. Optionally pass 'sdk_name' to "
+            "match a specific artifact filename (substring match, case-"
+            "insensitive); omit to list all available SDK downloads."
+        ),
+    )
+    async def get_pinelabs_sdk_download_link(sdk_name: str = "") -> dict[str, Any]:
+        logger.info(
+            "Tool invoked: get_pinelabs_sdk_download_link(sdk_name=%r)", sdk_name
+        )
+        sdks = _discover_sdks(sdk_dir)
+        if not sdks:
+            return _text_response("No SDK artifacts are currently published.")
+
+        if sdk_name and sdk_name.strip():
+            needle = sdk_name.strip().lower()
+            matched = [p for p in sdks if needle in p.name.lower()]
+            if not matched:
+                available = ", ".join(p.name for p in sdks)
+                return _text_response(
+                    f"No SDK matching '{sdk_name}' was found. "
+                    f"Available SDKs: {available}"
+                )
+            sdks = matched
+
+        lines = ["=== PINE LABS SDK DOWNLOAD LINKS ==="]
+        for p in sdks:
+            size_kb = p.stat().st_size / 1024
+            url = f"{base}/{p.name}"
+            lines.append(f"- {p.name} ({size_kb:,.1f} KB)\n  {url}")
+        return _text_response("\n".join(lines))

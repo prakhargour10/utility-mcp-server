@@ -47,29 +47,23 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
-    # Pine Labs documentation source
-    docs_base_url: str = field(
-        default_factory=lambda: os.environ.get(
-            "PINELABS_DOCS_BASE_URL",
-            "https://vnykumargoyal.github.io/pinelabs-docs",
-        ).rstrip("/")
-    )
-    docs_http_timeout: float = field(
-        default_factory=lambda: _env_float("PINELABS_DOCS_HTTP_TIMEOUT", 10.0)
-    )
-    docs_cache_ttl_seconds: int = field(
-        default_factory=lambda: _env_int("PINELABS_DOCS_CACHE_TTL", 300)
-    )
-    docs_http_retries: int = field(
-        default_factory=lambda: _env_int("PINELABS_DOCS_HTTP_RETRIES", 2)
+    # Local Pine Labs documentation bundle
+    docs_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("PINELABS_DOCS_DIR", str(REPO_ROOT / "docs"))
+        )
     )
 
-    # SDK download artifacts (still served from local repo)
-    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "sdk")
+    # SDK download artifacts (served from local repo)
+    sdk_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("PINELABS_SDK_DIR", str(REPO_ROOT / "docs" / "sdk"))
+        )
+    )
     sdk_download_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "SDK_DOWNLOAD_BASE_URL",
-            "https://github.com/prakhargour10/utility-mcp-server/raw/main/sdk",
+            "https://github.com/prakhargour10/utility-mcp-server/raw/main/docs/sdk",
         ).rstrip("/")
     )
 

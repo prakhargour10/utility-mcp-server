@@ -22,3 +22,11 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local secrets / env
+.env
+.env.local
+.env.*.local
+
+# RAG pipeline artifacts (regenerated via the rag.ingest / rag.embed CLIs)
+data/

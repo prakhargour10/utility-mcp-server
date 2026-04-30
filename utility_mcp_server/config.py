@@ -6,6 +6,25 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv as _load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    _load_dotenv = None
+
+
+# Repository root: <repo>/utility_mcp_server/config.py -> parents[1]
+REPO_ROOT: Path = Path(__file__).resolve().parents[1]
+
+# Load .env from the repo root (and the current working directory as a
+# fallback) the first time this module is imported. Existing OS env vars
+# always win over .env values.
+if _load_dotenv is not None:
+    _env_file = REPO_ROOT / ".env"
+    if _env_file.exists():
+        _load_dotenv(_env_file, override=False)
+    else:
+        _load_dotenv(override=False)
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -17,25 +36,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
 def _env_list(name: str, default: list[str]) -> list[str]:
     raw = os.environ.get(name)
     if not raw:
         return list(default)
     return [item.strip() for item in raw.split(",") if item.strip()]
-
-
-# Repository root: <repo>/utility_mcp_server/config.py -> parents[1]
-REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -47,21 +52,12 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
-    # Pine Labs documentation source
+    # Pine Labs documentation source (used by the RAG ingest stage)
     docs_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "PINELABS_DOCS_BASE_URL",
             "https://vnykumargoyal.github.io/pinelabs-docs",
         ).rstrip("/")
-    )
-    docs_http_timeout: float = field(
-        default_factory=lambda: _env_float("PINELABS_DOCS_HTTP_TIMEOUT", 10.0)
-    )
-    docs_cache_ttl_seconds: int = field(
-        default_factory=lambda: _env_int("PINELABS_DOCS_CACHE_TTL", 300)
-    )
-    docs_http_retries: int = field(
-        default_factory=lambda: _env_int("PINELABS_DOCS_HTTP_RETRIES", 2)
     )
 
     # SDK download artifacts (still served from local repo)
@@ -84,6 +80,68 @@ class Settings:
             ],
         )
     )
+
+    # ------------------------------------------------------------------
+    # RAG (Retrieval-Augmented Generation)
+    # ------------------------------------------------------------------
+    # Local directory where ingested raw markdown is written. Used as the
+    # source of truth for chunking + embedding.
+    rag_raw_docs_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get(
+                "RAG_RAW_DOCS_DIR",
+                str(REPO_ROOT / "data" / "raw_docs"),
+            )
+        )
+    )
+    # Routes (relative to docs_base_url, without the .md suffix) that
+    # expose raw markdown content. Override with a comma-separated list.
+    rag_doc_routes: list[str] = field(
+        default_factory=lambda: _env_list(
+            "RAG_DOC_ROUTES",
+            [
+                "api/init",
+                "api/do-transaction",
+                "concepts/getting-started",
+                "concepts/error-handling",
+                "concepts/transports",
+            ],
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # AWS Bedrock (Claude + Titan embeddings)
+    # ------------------------------------------------------------------
+    bedrock_api_key: str = field(
+        default_factory=lambda: os.environ.get("BEDROCK_API_KEY", "")
+    )
+    bedrock_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "BEDROCK_MODEL", "global.anthropic.claude-opus-4-6-v1"
+        )
+    )
+    bedrock_region: str = field(
+        default_factory=lambda: os.environ.get("BEDROCK_REGION", "us-east-1")
+    )
+    bedrock_embedding_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "BEDROCK_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0"
+        )
+    )
+
+    @property
+    def bedrock_converse_url(self) -> str:
+        return (
+            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
+            f"/model/{self.bedrock_model}/converse"
+        )
+
+    @property
+    def bedrock_embedding_url(self) -> str:
+        return (
+            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
+            f"/model/{self.bedrock_embedding_model}/invoke"
+        )
 
 
 def get_settings() -> Settings:

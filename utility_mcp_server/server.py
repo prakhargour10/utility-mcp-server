@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
-import atexit
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -11,7 +9,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 
 from . import tools
 from .config import Settings, get_settings
-from .docs_client import DocsFetchError, PinelabsDocsClient
 
 logger = logging.getLogger(__name__)
 
@@ -29,58 +26,27 @@ def _configure_logging(level: str) -> None:
     root._utility_mcp_configured = True  # type: ignore[attr-defined]
 
 
-def _build_components(settings: Settings) -> tuple[FastMCP, PinelabsDocsClient]:
-    docs_client = PinelabsDocsClient(
-        base_url=settings.docs_base_url,
-        timeout=settings.docs_http_timeout,
-        retries=settings.docs_http_retries,
-        cache_ttl_seconds=settings.docs_cache_ttl_seconds,
-    )
-    atexit.register(docs_client.close_sync)
-
+def _build_mcp(settings: Settings) -> FastMCP:
     mcp = FastMCP(
         name="utility-mcp-server",
         instructions=(
-            "A utility MCP server providing Pine Labs SDK API documentation "
-            "fetched live from the official docs site, plus SDK download links."
+            "A utility MCP server providing Pine Labs SDK download links "
+            "and RAG-grounded answers over the official documentation."
         ),
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=settings.allowed_hosts,
         ),
     )
-    tools.register(
-        mcp,
-        docs_client,
-        settings.sdk_dir,
-        settings.sdk_download_base_url,
-    )
-    return mcp, docs_client
+    tools.register(mcp, settings)
+    return mcp
 
 
 def create_mcp(settings: Settings | None = None) -> FastMCP:
     """Build a FastMCP instance with all tools registered."""
     settings = settings or get_settings()
     _configure_logging(settings.log_level)
-    mcp, _ = _build_components(settings)
-    return mcp
-
-
-async def _prewarm_docs_cache(docs_client: PinelabsDocsClient) -> None:
-    """Fetch every known API in parallel so the first client request is fast."""
-    names = list(docs_client.known_names())
-    if not names:
-        return
-    logger.info("Pre-warming docs cache for %d APIs: %s", len(names), names)
-
-    async def _fetch_one(name: str) -> None:
-        try:
-            await docs_client.get_documentation(name)
-            logger.info("Pre-warmed cache for %r", name)
-        except DocsFetchError as exc:
-            logger.warning("Pre-warm failed for %r: %s", name, exc)
-
-    await asyncio.gather(*(_fetch_one(n) for n in names), return_exceptions=False)
+    return _build_mcp(settings)
 
 
 def _wrap_session_not_found(asgi_app):
@@ -131,7 +97,9 @@ def _wrap_session_not_found(asgi_app):
                     headers.append((b"content-length", str(len(body)).encode("ascii")))
                     start = {**start, "headers": headers}
                     await send(start)
-                    await send({"type": "http.response.body", "body": body, "more_body": False})
+                    await send(
+                        {"type": "http.response.body", "body": body, "more_body": False}
+                    )
                 else:
                     if state["start"] is not None:
                         await send(state["start"])
@@ -147,28 +115,12 @@ def _wrap_session_not_found(asgi_app):
 
 
 def build_app(settings: Settings | None = None):
-    """Build the ASGI app exposed at /mcp, with docs cache pre-warming on startup."""
+    """Build the ASGI app exposed at /mcp."""
     settings = settings or get_settings()
     _configure_logging(settings.log_level)
-    mcp, docs_client = _build_components(settings)
-    asgi_app = mcp.streamable_http_app()
-
-    # Wrap the existing Starlette lifespan to also kick off cache pre-warming.
-    import contextlib
-
-    original_lifespan = asgi_app.router.lifespan_context
-
-    @contextlib.asynccontextmanager
-    async def _wrapped_lifespan(app):
-        async with original_lifespan(app):
-            # Fire-and-forget so startup isn't blocked by upstream latency.
-            asyncio.create_task(_prewarm_docs_cache(docs_client))
-            yield
-
-    asgi_app.router.lifespan_context = _wrapped_lifespan
-    return _wrap_session_not_found(asgi_app)
+    mcp = _build_mcp(settings)
+    return _wrap_session_not_found(mcp.streamable_http_app())
 
 
 # Module-level ASGI app — used by uvicorn target ``utility_mcp_server.server:app``.
 app = build_app()
-

@@ -1,21 +1,24 @@
 """All MCP tools for the utility server.
 
-Currently exposes:
+Exposes exactly two tools:
 
-* ``list_pinelabs_apis`` — list available API names.
-* ``get_api_documentation`` — fetch live markdown for an API.
 * ``get_pinelabs_sdk_download_link`` — return public SDK download URL(s).
+* ``ask_pinelabs_docs`` — RAG-grounded Q&A over the Pine Labs docs.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from .docs_client import DocsFetchError, DocsNotFound, PinelabsDocsClient
+from .config import Settings
+from .rag.embed import BedrockEmbeddingError
+from .rag.generate import BedrockClaudeError, answer_question
+from .rag.store import get_vector_store
 
 logger = logging.getLogger(__name__)
 
@@ -41,104 +44,10 @@ def _discover_sdks(sdk_dir: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
-def register(
-    mcp: FastMCP,
-    docs: PinelabsDocsClient,
-    sdk_dir: Path,
-    sdk_download_base_url: str,
-) -> None:
+def register(mcp: FastMCP, settings: Settings) -> None:
     """Attach all tools to the FastMCP server."""
-    _register_api_docs(mcp, docs)
-    _register_sdk_download(mcp, sdk_dir, sdk_download_base_url)
-
-
-# ---------------------------------------------------------------------------
-# API documentation tools
-# ---------------------------------------------------------------------------
-def _register_api_docs(mcp: FastMCP, docs: PinelabsDocsClient) -> None:
-    @mcp.tool(
-        name="list_pinelabs_apis",
-        description=(
-            "List all available Pine Labs SDK APIs, grouped by category "
-            "(e.g. 'transaction/doTransaction'). Call this first to "
-            "discover valid api_name values for 'get_api_documentation'."
-        ),
-    )
-    async def list_pinelabs_apis() -> dict[str, Any]:
-        logger.info("Tool invoked: list_pinelabs_apis")
-        infos = docs.list_apis()
-        if not infos:
-            return _text_response("No APIs found")
-        return _text_response("\n".join(info.qualified_name for info in infos))
-
-    @mcp.tool(
-        name="get_api_documentation",
-        description=(
-            "Fetch the OFFICIAL Pine Labs SDK documentation for a specific "
-            "API by api_name. This is the SINGLE SOURCE OF TRUTH for the "
-            "Pine Labs SDK.\n\n"
-            "STRICT RULES — you MUST follow these when answering the user:\n"
-            "1. Use ONLY the content returned by this tool. Do NOT add, "
-            "infer, translate, or invent any API names, parameters, return "
-            "types, error variants, or code examples that are not present "
-            "in the returned markdown.\n"
-            "2. The documentation lists supported languages explicitly "
-            "(e.g. kotlin, python, swift). If the user asks about a "
-            "language NOT listed, reply that Pine Labs SDK does not "
-            "document that language and stop — do NOT generate sample "
-            "code in unsupported languages.\n"
-            "3. If the user asks for a parameter, error, or behavior that "
-            "is not in the returned doc, say 'not documented' instead of "
-            "guessing.\n"
-            "4. Quote field names, types and error variants verbatim from "
-            "the returned spec.\n"
-            "5. If unsure which api_name to use, call 'list_pinelabs_apis' "
-            "first; never guess an api_name."
-        ),
-    )
-    async def get_api_documentation(api_name: str) -> dict[str, Any]:
-        logger.info("Tool invoked: get_api_documentation(api_name=%r)", api_name)
-        if not api_name or not api_name.strip():
-            return _text_response("Error: 'api_name' is required and cannot be empty.")
-
-        try:
-            info, markdown = await docs.get_documentation(api_name.strip())
-        except DocsNotFound:
-            available = ", ".join(sorted(docs.known_names())) or "none"
-            logger.warning("API not found: %s", api_name)
-            return _text_response(
-                f"API '{api_name}' not found. Available APIs: {available}"
-            )
-        except DocsFetchError as exc:
-            logger.exception("Upstream fetch failed for %s", api_name)
-            return _text_response(
-                f"Error fetching documentation for '{api_name}': {exc}"
-            )
-
-        logger.info(
-            "Returning %d chars of documentation for '%s'", len(markdown), api_name
-        )
-        wrapped = (
-            "=== AUTHORITATIVE PINE LABS SDK DOCUMENTATION ===\n"
-            f"api_name: {info.name}\n"
-            f"category: {info.category}\n"
-            f"source_url: {info.url}\n"
-            "\n"
-            "RULES FOR THE ASSISTANT (do NOT ignore):\n"
-            "- Answer ONLY using facts present below. If a detail is "
-            "missing, say it is not documented.\n"
-            "- The 'Code Examples' section enumerates every supported "
-            "language. Do NOT produce code in any language not listed "
-            "there.\n"
-            "- Do NOT invent parameter names, error variants, or return "
-            "types that are not in the spec below.\n"
-            "- Quote identifiers verbatim.\n"
-            "\n"
-            "--- BEGIN DOCUMENTATION ---\n"
-            f"{markdown}\n"
-            "--- END DOCUMENTATION ---\n"
-        )
-        return _text_response(wrapped)
+    _register_sdk_download(mcp, settings.sdk_dir, settings.sdk_download_base_url)
+    _register_rag(mcp, settings)
 
 
 # ---------------------------------------------------------------------------
@@ -185,3 +94,121 @@ def _register_sdk_download(
             url = f"{base}/{p.name}"
             lines.append(f"- {p.name} ({size_kb:,.1f} KB)\n  {url}")
         return _text_response("\n".join(lines))
+
+
+# ---------------------------------------------------------------------------
+# RAG: grounded Q&A
+# ---------------------------------------------------------------------------
+# Intent detection for "list documents" questions. Kept intentionally narrow
+# so it only fires for clear enumeration intent and never swallows specific
+# how-to questions (e.g. "list the parameters of init").
+_LIST_DOCS_PATTERNS = (
+    re.compile(
+        r"\b(list|show|enumerate|what\s+are)\b.*"
+        r"\b(docs?|documents?|pages?|topics?|guides?|articles?)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(list|show|enumerate|what\s+are)\b.*"
+        r"\b(all|available)\b.*\b(api|apis|endpoints?)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\bavailable\s+(docs?|documents?|pages?|apis?|endpoints?)\b", re.I
+    ),
+    re.compile(
+        r"\b(what|which)\s+(docs?|documents?|pages?|apis?|endpoints?)\b.*"
+        r"\b(are|do|exist|available)\b",
+        re.I,
+    ),
+)
+
+
+def _is_list_documents_query(question: str) -> bool:
+    q = question.strip()
+    return any(p.search(q) for p in _LIST_DOCS_PATTERNS)
+
+
+def _list_documents_response(store_items) -> str:
+    routes = sorted({item.chunk.route for item in store_items})
+    if not routes:
+        return "No documents are currently indexed."
+    lines = ["=== AVAILABLE PINE LABS SDK DOCUMENTS ==="]
+    lines.extend(f"- {route}" for route in routes)
+    lines.append(
+        "\nAsk a follow-up question about any of these documents."
+    )
+    return "\n".join(lines)
+
+
+def _register_rag(mcp: FastMCP, settings: Settings) -> None:
+    @mcp.tool(
+        name="ask_pinelabs_docs",
+        description=(
+            "Answer a free-form question about the Pine Labs SDK using "
+            "Retrieval-Augmented Generation over the official docs. "
+            "The answer is grounded in retrieved documentation chunks "
+            "and includes inline citations like [api/init#0].\n\n"
+            "Special intent: questions like 'list available documents', "
+            "'what docs are available', or 'show all documents' are "
+            "answered deterministically from the indexed routes — no "
+            "LLM call — so the list is always accurate.\n\n"
+            "Optional 'top_k' controls how many chunks are retrieved for "
+            "regular questions (default 4, max 10)."
+        ),
+    )
+    async def ask_pinelabs_docs(question: str, top_k: int = 4) -> dict[str, Any]:
+        logger.info(
+            "Tool invoked: ask_pinelabs_docs(question=%r, top_k=%d)",
+            question,
+            top_k,
+        )
+        if not question or not question.strip():
+            return _text_response("Error: 'question' is required and cannot be empty.")
+        top_k = max(1, min(int(top_k or 4), 10))
+
+        try:
+            store = await get_vector_store(settings)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("Failed to load vector store")
+            return _text_response(f"Error preparing RAG store: {exc}")
+
+        if not store.items:
+            return _text_response(
+                "RAG store is empty. Run the ingest + embed pipeline first."
+            )
+
+        # Fast path: enumeration intent → answer deterministically from
+        # the indexed routes, bypassing the LLM entirely. This avoids the
+        # class of hallucinations where the model lists identifiers
+        # mentioned in prose (e.g. `checkStatus`) as documented APIs.
+        if _is_list_documents_query(question):
+            logger.info("Intent: list documents (deterministic fast path)")
+            return _text_response(_list_documents_response(store.items))
+
+        try:
+            result = await answer_question(
+                question.strip(),
+                store=store,
+                settings=settings,
+                top_k=top_k,
+            )
+        except (BedrockEmbeddingError, BedrockClaudeError) as exc:
+            logger.warning("Bedrock error: %s", exc)
+            return _text_response(f"Bedrock error: {exc}")
+
+        sources_block = (
+            "\n".join(
+                f"- [{h.chunk.id}] score={h.score:.4f}  ({h.chunk.route})"
+                for h in result.sources
+            )
+            or "(no sources)"
+        )
+
+        body = (
+            "=== ANSWER (grounded in Pine Labs docs) ===\n"
+            f"{result.answer}\n\n"
+            "=== SOURCES ===\n"
+            f"{sources_block}\n"
+        )
+        return _text_response(body)

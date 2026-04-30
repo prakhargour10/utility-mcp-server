@@ -137,7 +137,7 @@ async def fetch_all_docs(
 
     Args:
         routes: Routes to fetch (e.g. ``"api/init"``), without ``.md`` suffix.
-        base_url: Docs site base URL (e.g. ``https://.../pinelabs-docs``).
+        base_url: Docs site base URL (e.g. ``https://.../pinelabs-doc/docs``).
         output_dir: Local directory to write ``.md`` files into.
         force: Re-download even if the target file already exists.
         timeout: Per-request HTTP timeout in seconds.

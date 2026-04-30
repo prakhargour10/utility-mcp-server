@@ -24,6 +24,8 @@ dev = [
 
 [project.scripts]
 utility-mcp-server = "utility_mcp_server.cli:main"
+rag-rebuild = "utility_mcp_server.rag.cli:rebuild_main"
+rag-load = "utility_mcp_server.rag.cli:load_main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["utility_mcp_server"]

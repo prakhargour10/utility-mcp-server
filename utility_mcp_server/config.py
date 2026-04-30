@@ -56,7 +56,7 @@ class Settings:
     docs_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "PINELABS_DOCS_BASE_URL",
-            "https://vnykumargoyal.github.io/pinelabs-docs",
+            "https://portal.tms.uat.pinelabs.com/pinelabs-doc/docs",
         ).rstrip("/")
     )
 
@@ -100,11 +100,21 @@ class Settings:
         default_factory=lambda: _env_list(
             "RAG_DOC_ROUTES",
             [
-                "api/init",
-                "api/do-transaction",
-                "concepts/getting-started",
-                "concepts/error-handling",
+                "overview",
+                "concepts/lifecycle",
                 "concepts/transports",
+                "concepts/capabilities",
+                "concepts/eventid",
+                "concepts/error-handling",
+                "concepts/result-payload",
+                "concepts/versioning",
+                "languages/android",
+                "languages/ios",
+                "languages/python",
+                "languages/nodejs",
+                "languages/c",
+                "wire-formats/csv",
+                "wire-formats/pad-controller-frame",
             ],
         )
     )

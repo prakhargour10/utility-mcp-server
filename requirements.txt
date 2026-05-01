@@ -8,3 +8,5 @@ python-dotenv>=1.0.0
 
 # RAG pipeline
 llama-index-core>=0.11.0
+faiss-cpu>=1.8.0
+numpy>=1.26.0

@@ -25,9 +25,18 @@ import logging
 import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 import httpx
+import numpy as np
+
+try:
+    import faiss  # type: ignore
+except ImportError as _faiss_exc:  # pragma: no cover - faiss is required at runtime
+    faiss = None  # type: ignore
+    _FAISS_IMPORT_ERROR = _faiss_exc
+else:
+    _FAISS_IMPORT_ERROR = None
 
 from ..config import Settings, get_settings
 from .chunk import Chunk, chunk_documents
@@ -230,28 +239,72 @@ class SearchHit:
 
 @dataclass
 class VectorStore:
-    """Tiny in-memory vector store with cosine similarity search."""
+    """In-memory vector store backed by a FAISS ``IndexFlatIP`` index.
+
+    Titan v2 embeddings are L2-normalized by default, so inner-product
+    similarity over normalized vectors is equivalent to cosine similarity.
+    The FAISS index is built lazily on the first :meth:`search` call (and
+    invalidated on every :meth:`add` / :meth:`extend`).
+    """
 
     items: list[EmbeddedChunk] = field(default_factory=list)
+    _index: Any = field(default=None, init=False, repr=False)
+    _index_size: int = field(default=0, init=False, repr=False)
 
     def add(self, item: EmbeddedChunk) -> None:
         self.items.append(item)
+        self._index = None
 
     def extend(self, items: Iterable[EmbeddedChunk]) -> None:
         self.items.extend(items)
+        self._index = None
 
     def __len__(self) -> int:
         return len(self.items)
 
-    def search(self, query_embedding: Sequence[float], top_k: int = 5) -> list[SearchHit]:
+    def _ensure_index(self) -> Any:
         if not self.items:
+            return None
+        if self._index is not None and self._index_size == len(self.items):
+            return self._index
+        if faiss is None:  # pragma: no cover - defensive
+            raise RuntimeError(
+                "faiss is not installed. Install it with `pip install faiss-cpu`."
+            ) from _FAISS_IMPORT_ERROR
+
+        dim = self.items[0].dimensions
+        matrix = np.asarray(
+            [item.embedding for item in self.items], dtype="float32"
+        )
+        if matrix.shape[1] != dim:
+            raise ValueError(
+                f"Embedding dim mismatch: expected {dim}, got {matrix.shape[1]}"
+            )
+        index = faiss.IndexFlatIP(dim)
+        index.add(matrix)
+        self._index = index
+        self._index_size = len(self.items)
+        logger.info("Built FAISS IndexFlatIP (n=%d, dim=%d)", index.ntotal, dim)
+        return index
+
+    def search(self, query_embedding: Sequence[float], top_k: int = 5) -> list[SearchHit]:
+        index = self._ensure_index()
+        if index is None:
             return []
-        scored = [
-            SearchHit(chunk=item.chunk, score=_cosine(query_embedding, item.embedding))
-            for item in self.items
-        ]
-        scored.sort(key=lambda h: h.score, reverse=True)
-        return scored[: max(1, top_k)]
+        k = max(1, min(int(top_k), len(self.items)))
+        query = np.asarray([list(query_embedding)], dtype="float32")
+        if query.shape[1] != self.items[0].dimensions:
+            raise ValueError(
+                f"Vector dim mismatch: {query.shape[1]} vs "
+                f"{self.items[0].dimensions}"
+            )
+        scores, idxs = index.search(query, k)
+        hits: list[SearchHit] = []
+        for score, i in zip(scores[0].tolist(), idxs[0].tolist()):
+            if i < 0:
+                continue
+            hits.append(SearchHit(chunk=self.items[i].chunk, score=float(score)))
+        return hits
 
     # -- persistence ----------------------------------------------------
     def save(self, path: Path) -> None:
@@ -268,6 +321,7 @@ class VectorStore:
 
 
 def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
+    """Pure-Python cosine similarity (kept for tests / non-FAISS callers)."""
     if len(a) != len(b):
         raise ValueError(f"Vector dim mismatch: {len(a)} vs {len(b)}")
     dot = 0.0
@@ -386,7 +440,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--query",
         type=str,
         default=None,
-        help="Optional query text — runs cosine similarity over the store.",
+        help="Optional query text — runs FAISS similarity search over the store.",
     )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--log-level", default="INFO")

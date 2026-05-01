@@ -1,7 +1,7 @@
 """Chunk markdown docs into nodes (RAG pipeline stage 1).
 
 Reads every ``.md`` file under the docs directory configured by
-``settings.rag_raw_docs_dir`` (defaults to ``docs/``) and splits them into
+``settings.rag_raw_docs_dir`` (defaults to ``docs/doc_list/``) and splits them into
 overlapping sentence-aware chunks using LlamaIndex's :class:`SentenceSplitter`.
 
 The output is a list of :class:`Chunk` objects, each carrying:
@@ -238,7 +238,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not raw_dir.exists():
         logger.error(
             "Docs directory does not exist: %s\n"
-            "Set RAG_RAW_DOCS_DIR or place markdown under the default docs/ folder.",
+            "Set RAG_RAW_DOCS_DIR or place markdown under the default docs/doc_list/ folder.",
             raw_dir,
         )
         return 2

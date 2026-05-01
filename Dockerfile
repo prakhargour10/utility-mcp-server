@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --trusted-host pypi.org --trusted-host files.pyth
 
 COPY main.py .
 COPY utility_mcp_server/ utility_mcp_server/
-COPY sdk/ sdk/
+COPY docs/ docs/
 
 EXPOSE 8000
 

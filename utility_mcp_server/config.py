@@ -53,11 +53,11 @@ class Settings:
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
     # SDK download artifacts (still served from local repo)
-    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "sdk")
+    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "docs" / "sdk_list")
     sdk_download_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "SDK_DOWNLOAD_BASE_URL",
-            "https://github.com/prakhargour10/utility-mcp-server/raw/main/sdk",
+            "https://github.com/prakhargour10/utility-mcp-server/raw/main/docs/sdk_list",
         ).rstrip("/")
     )
 
@@ -84,7 +84,7 @@ class Settings:
         default_factory=lambda: Path(
             os.environ.get(
                 "RAG_RAW_DOCS_DIR",
-                str(REPO_ROOT / "docs"),
+                str(REPO_ROOT / "docs" / "doc_list"),
             )
         )
     )

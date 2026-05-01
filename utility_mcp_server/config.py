@@ -47,23 +47,28 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
-    # Local Pine Labs documentation bundle
+    # Local Pine Labs documentation bundle. The bundle layout is:
+    #   <docs_dir>/get_documentation_list.json   <- master registry
+    #   <docs_dir>/doc_list/{apis,concepts,models,languages}/*.md
+    #   <docs_dir>/sdk_list/*.{zip,aar,jar,...}
     docs_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("PINELABS_DOCS_DIR", str(REPO_ROOT / "docs"))
         )
     )
 
-    # SDK download artifacts (served from local repo)
+    # SDK download artifacts (served from local repo, under docs/sdk_list).
     sdk_dir: Path = field(
         default_factory=lambda: Path(
-            os.environ.get("PINELABS_SDK_DIR", str(REPO_ROOT / "docs" / "sdk"))
+            os.environ.get(
+                "PINELABS_SDK_DIR", str(REPO_ROOT / "docs" / "sdk_list")
+            )
         )
     )
     sdk_download_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "SDK_DOWNLOAD_BASE_URL",
-            "https://github.com/prakhargour10/utility-mcp-server/raw/main/docs/sdk",
+            "https://github.com/prakhargour10/utility-mcp-server/raw/main/docs/sdk_list",
         ).rstrip("/")
     )
 

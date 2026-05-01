@@ -4,26 +4,26 @@
 
 ## Purpose
 
-Allowed payment instruments. Open set; explicitly IGNORED on Cloud (use TransportOptions.Cloud.allowed_payment_mode string instead).
+Allowed payment instruments for a `TransactionRequest`. **Open set in v1** — additional variants will be added.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
-| `Card` |  |
-| `Upi` |  |
-| `Wallet` |  |
-| `Bnpl` |  |
-| `Emi` |  |
-| `Cash` |  |
+| `Card` | Credit / debit card. |
+| `Upi` | UPI. |
+| `Wallet` | Digital wallet. |
+| `Bnpl` | Buy-Now-Pay-Later. |
+| `Emi` | EMI on card. |
+| `Cash` | Cash. |
 
 ## MUST
 
-- On Cloud transport, use the opaque string in CloudTransactionOptions.allowed_payment_mode.
+- Generated `when` / `switch` MUST include a default arm — this is an open enum.
 
 ## MUST NOT
 
-- Do not assume the enum is exhaustive — new variants may appear in minor releases.
+- Do not use this on the Cloud transport — it is **explicitly ignored on Cloud in v1**. Use `CloudTransactionOptions.allowed_payment_mode` (opaque string) instead.
 
 ## Cross-references
 

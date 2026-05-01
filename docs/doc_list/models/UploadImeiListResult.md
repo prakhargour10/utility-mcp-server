@@ -4,26 +4,18 @@
 
 ## Purpose
 
-Result of upload_imei_list.
+Result of `upload_imei_list`. `response_code` is the decimal-stringified upstream code; `response_message` is the upstream verbatim message when present.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `response_code` | `string` | yes | Decimal-stringified upstream code. |
-| `response_message` | `string?` | no | Verbatim upstream message when present. |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `response_code` | `string` | yes | |
+| `response_message` | `string?` | no | |
 
 ## Cross-references
 
-`upload_imei_list`
+`CloudUploadImeiListOptions`, `apis/upload_imei_list`
 
 ## Per-language naming
 

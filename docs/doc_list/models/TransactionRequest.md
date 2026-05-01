@@ -4,39 +4,39 @@
 
 ## Purpose
 
-Inputs for a single transaction. Validated synchronously in core before any I/O.
+Inputs for a single transaction.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `amount` | `u64` | yes | Lowest currency unit (paise). 0 < amount ≤ 99_999_999. |
-| `currency` | `string?` | no | ISO-4217. 3 ASCII uppercase letters. Default INR. |
+| `amount` | `u64` | yes | Lowest currency unit (paise for INR). `0 < amount <= 99_999_999`. |
+| `currency` | `string?` | no | ISO-4217. Default `"INR"`. If non-null, exactly 3 ASCII uppercase letters. |
 | `billing_ref_no` | `string` | yes | Non-blank after trim. |
-| `invoice_no` | `string?` | no | No SDK shape validation; accepted verbatim by terminal/back-end. |
-| `transaction_type` | `TransactionType` | yes | See TransactionType. |
-| `original_event_id` | `string?` | conditional | Required iff transaction_type ∈ {Refund, Void, Capture}; rejected otherwise. |
-| `reference_id` | `string?` | no | Free-form merchant reference echoed on TransactionResult. Max 64 chars. |
-| `metadata` | `record<string,string>?` | no | Max 10 entries; each value ≤ 256 chars. Never logged. |
-| `merchant_id` | `string?` | conditional | Required for non-AppToApp transports (TCP, Cloud). |
-| `terminal_id` | `string?` | conditional | Required for non-AppToApp transports (TCP, Cloud). |
-| `allowed_payment_modes` | `sequence<PaymentMode>?` | no | Filter for terminal payment selection. IGNORED on Cloud — use CloudTransactionOptions.allowed_payment_mode. |
-| `transport_options` | `TransportOptions?` | conditional | Variant MUST match active transport. REQUIRED on Cloud. |
+| `invoice_no` | `string?` | no | Forwarded verbatim. SDK enforces no shape constraint. |
+| `transaction_type` | `TransactionType` | yes | |
+| `original_event_id` | `string?` | conditional | Required for Refund / Void / Capture; rejected otherwise. |
+| `reference_id` | `string?` | no | Max 64 chars. Echoed on `TransactionResult`. |
+| `metadata` | `record<string,string>?` | no | Max 10 entries; each value max 256 chars. Never logged. |
+| `merchant_id` | `string?` | conditional | Required for transports that don't derive identity from the terminal (Cloud). Omitted on the wire by AppToApp. |
+| `terminal_id` | `string?` | conditional | As above. |
+| `allowed_payment_modes` | `sequence<PaymentMode>?` | no | Restricts terminal-presented instruments. **Ignored on Cloud in v1.** |
+| `transport_options` | `TransportOptions?` | conditional | Variant MUST match active transport. **REQUIRED on Cloud.** |
 
 ## MUST
 
-- Enforce all bounds client-side before calling do_transaction.
-- Pick the right TransportOptions variant for the active transport.
+- Pass `amount` in paise (lowest currency unit), not major units.
+- For Refund / Void / Capture, set `original_event_id` to the original Sale's `event_id`.
+- For Cloud, populate `transport_options` with the Cloud variant.
 
 ## MUST NOT
 
-- Do not pass amount as float or string; it is u64 paise.
-- Do not log metadata.
-- Do not pass card data, PII or PCI fields here.
+- Do not generate `event_id` yourself — the SDK allocates it.
+- Do not log `metadata`.
 
 ## Cross-references
 
-`TransactionType`, `TransportOptions`, `PaymentMode`, `TransactionResult`, `TransactionListener`
+`TransactionType`, `PaymentMode`, `TransportOptions`, `apis/do_transaction`
 
 ## Per-language naming
 

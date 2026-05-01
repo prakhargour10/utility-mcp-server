@@ -1,28 +1,25 @@
-# Model: `CancelOptions` (sealed)
+# Model: `CancelOptions` (sealed / [Enum] interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Per-call extras for cancel.
+Per-call transport-specific extras for `cancel`. v1 ships only the Cloud variant.
 
 ## Variants
 
 | Name | Signature | Notes |
 |---|---|---|
-| `Cloud` | `Cloud(CloudCancelOptions)` | REQUIRED on Cloud transport. |
+| `Cloud` | `Cloud(CloudCancelOptions options)` | Required when active transport is Cloud. |
 
 ## MUST
 
-- Use Cloud variant when active transport is Cloud; pass null otherwise.
-
-## MUST NOT
-
-- Do not pass on non-Cloud transports — InvalidInput.
+- Pass `null` for AppToApp / PADController (note: those raise `NotSupported` anyway in v1).
+- Pass the `Cloud` variant only when active transport is Cloud.
 
 ## Cross-references
 
-`cancel`, `CloudCancelOptions`
+`CloudCancelOptions`, `apis/cancel`
 
 ## Per-language naming
 

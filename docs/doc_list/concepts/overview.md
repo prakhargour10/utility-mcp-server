@@ -4,7 +4,10 @@
 
 ## What the SDK is
 
-The Pine Billing SDK is a single Rust core (`pine-billing-core`) projected via UniFFI into Kotlin (Android + JVM), with Swift / Python / Node.js / C planned (roadmap). It is a **payment transaction client** that talks to Pinelabs PoS terminals over one of several transports.
+The Pine Billing SDK (version `0.5.0-preview.2`) is a single Rust core
+projected via UniFFI into Kotlin (Android + JVM). Swift / Python /
+Node.js / C are roadmap. It is a **payment transaction client** that
+talks to Pinelabs PoS terminals over one of several transports.
 
 ## What the SDK is NOT
 
@@ -18,9 +21,9 @@ The Pine Billing SDK is a single Rust core (`pine-billing-core`) projected via U
 1. Construct one `PineBillingSdk` per process (`constructor`).
 2. Optionally `set_transport(...)` if the choice is dynamic.
 3. For each merchant transaction, call `do_transaction(request, listener)`.
-4. On `on_started(event_id)`, persist the `event_id` against the merchant order id.
+4. On `on_started(event_id)`, persist `event_id` against the merchant order id.
 5. On `on_success` or `on_failure`, finalise the merchant order.
-6. After process restart, reconcile any open order via `check_status(event_id)`.
+6. After process restart, reconcile any open order via `check_status(event_id)` (Cloud only — see capability matrix).
 
 ## Architecture (informational)
 
@@ -30,4 +33,4 @@ The Pine Billing SDK is a single Rust core (`pine-billing-core`) projected via U
 
 ## Next docs
 
-`lifecycle`, `transports`, `capabilities`, `error-handling`, `eventid-and-reconciliation`.
+`lifecycle`, `transports`, `capabilities`, `error-handling`, `eventid-and-reconciliation`, `versioning-and-support`, `binding-aliases`.

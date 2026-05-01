@@ -4,25 +4,17 @@
 
 ## Purpose
 
-PADController request extras placeholder. Loose key/value pairs forwarded into the CSV under their column names.
+PADController request extras placeholder. Loose key/value extras forwarded into the underlying CSV under their column names.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `extras` | `record<string,string>?` | no | Max 32 entries. Values may NOT contain ',' or '\n'. |
-
-## MUST
-
-- Sanitise values for ',' and newline before passing.
-
-## MUST NOT
-
-- Do not pass binary or sensitive data here.
+| `extras` | `record<string,string>?` | no | Max 32 entries; values may contain neither `,` nor `\n`. |
 
 ## Cross-references
 
-`TransportOptions`
+`TransportOptions`, `PadControllerConfig`
 
 ## Per-language naming
 

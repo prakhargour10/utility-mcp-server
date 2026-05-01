@@ -1,48 +1,86 @@
-# Language: Android — Requirements
+# Android — Requirements (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** Use this file to validate the user's environment BEFORE generating any setup snippets. Refuse and ask the user if any floor below is unmet.
+> **AI INSTRUCTIONS:** Treat every row in the tables below as hard floors. Do NOT lower any of them when generating Android sample code.
 
-## Status
+## Toolchain floors
 
-✅ **Shipping in 0.5.0-preview.2** as `pine-billing-sdk-0.5.0-preview.2.aar`.
-
-## Operating system / architecture matrix
-
-| ABI | Status |
-|---|---|
-| `arm64-v8a` | ✓ shipping |
-| `armeabi-v7a` | ✓ shipping |
-| `x86`, `x86_64` | ✗ not in this release (emulator-only ABIs are not packaged) |
-
-## Toolchain floor
-
-| Tool | Minimum | Notes |
+| Tool | Floor | Notes |
 |---|---|---|
-| Android Gradle Plugin | 8.0 | namespaces required |
-| Kotlin | 1.9 | needed for unsigned-int interop with the UniFFI surface |
-| JDK | 17 | required by AGP 8 |
-| `compileSdk` | 34 | |
-| `minSdk` | 21 | (Android 5.0 Lollipop) |
-| `targetSdk` | 33+ | recommended |
+| Android Gradle Plugin | **9.0.1+** | AGP 8.x configurations differ; see § "AGP 8 vs AGP 9". |
+| Kotlin | **2.0.0+** | Required by AGP 9. |
+| Gradle | **8.13+** | Bundled with AGP 9. |
+| JDK (build) | **17** | AGP 9 enforces JDK 17 for the Gradle worker. |
 
-## Runtime prerequisites
+## Android SDK targets
 
-| Transport | Prerequisite |
+| Property | Value | Why |
+|---|---|---|
+| `compileSdk` | **36** | AGP 9 default. |
+| `targetSdk` | **35** | Android 15 — current Play target. |
+| `minSdk` | **23** | UniFFI's JNA dependency requires API 23+. **NOT 21.** |
+
+## Mandatory runtime dependencies (consumer must declare)
+
+The AAR ships transport adapters and façade classes only. The following are `implementation`-scoped inside the AAR (NOT transitive); the consumer app MUST declare them:
+
+| Coordinate | Why |
 |---|---|
-| AppToApp | The Pinelabs PoS / MasterApp package installed on the same device. |
-| Cloud | `<uses-permission android:name="android.permission.INTERNET" />`. Reachable Cloud `base_url`. |
-| PADController | A PADController gateway daemon listening on `127.0.0.1:8082` (or the configured host/port) on the same device. |
-| AppToApp on Android 11+ | A `<queries>` block declaring the upstream PoS package — without it `bindService` returns `false` even if the package is installed. |
+| `net.java.dev.jna:jna:5.14.0@aar` | UniFFI Kotlin bindings call the Rust `cdylib` through JNA. **The `@aar` classifier is required** — the plain JAR variant is for desktop JVM and crashes on Android. |
+| `com.google.code.gson:gson:2.11.0` | `MasterAppTransport` serialises the AppToApp envelope through Gson. |
 
-## NOT required
+## ABIs
 
-| Item | Reason |
-|---|---|
-| `net.java.dev.jna:jna:*` | The AAR loads its native library via `System.loadLibrary("uniffi_pine_billing")` directly. JNA is required only for the JVM binding. |
-| Foreground service | Optional. Recommended if a transaction can outlive an Activity (best practice; see `integration.md`). |
+The AAR contains:
 
-## Next docs
+- `arm64-v8a`
+- `armeabi-v7a`
 
-`android/setup`, `android/integration`, `android/examples`,
-`android/errors`, `android/distribution`,
-`concepts/threading`, `concepts/distribution`.
+It does **NOT** contain `x86`, `x86_64`. Standard Android emulator images (x86_64) will fail at SDK construction with `UnsatisfiedLinkError: libuniffi_pine_billing`. Use a real arm64 device or an `arm64-v8a` emulator image.
+
+## Native-lib packaging
+
+Add to `android.packaging`:
+
+```kotlin
+android {
+    packaging {
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"
+        }
+    }
+}
+```
+
+The Pine SDK and JNA both ship `libc++_shared.so`; without `pickFirsts` the build fails with a duplicate-resource error.
+
+## Compose / `BuildConfig`
+
+If you reference `BuildConfig.PINELABS_APP_ID` (you should — see `integration.md`), AGP 8+ requires:
+
+```kotlin
+android {
+    buildFeatures {
+        buildConfig = true
+    }
+}
+```
+
+Failing to enable this surfaces as `Unresolved reference: BuildConfig` at compile time.
+
+## AGP 8 vs AGP 9
+
+| Concern | AGP 9 (recommended) | AGP 8 (legacy) |
+|---|---|---|
+| Kotlin JVM target | `kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }` | `kotlinOptions { jvmTarget = "17" }` |
+| Gradle | 8.13+ | 8.7+ |
+| Kotlin | 2.0.0+ | 1.9.x ok |
+
+`kotlinOptions { jvmTarget = "17" }` is **invalid on AGP 9** and produces a build-script error.
+
+## ProGuard / R8
+
+The AAR ships `consumer-rules.pro` so apps with R8 enabled need no manual rules. **Known issue (0.5.0-preview.2):** the bundled rule references the wrong UniFFI namespace (`uniffi.pine_billing_sdk.**` instead of `uniffi.pine_billing.**`). See `errors.md` § "ProGuard / R8 stripped UniFFI bindings" for the workaround.
+
+## OEM matrix
+
+Device must be a Pinelabs-flashed Android terminal where the upstream PoS app (`com.pinelabs.masterapp` — confirm with your OEM contact) is installed. Generic Android devices CANNOT run AppToApp transactions.

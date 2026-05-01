@@ -1,8 +1,6 @@
 # API: `test_print`
 
-> **AI INSTRUCTIONS:** This file describes the public method `test_print` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `test_print` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
@@ -12,37 +10,31 @@ test_print(TestPrintListener listener)
 
 ## Purpose
 
-Print a no-op test slip on the terminal's printer.
-
-## Parameters
-
-| Name | Type | Required | Notes |
-|---|---|---|---|
-| `listener` | `TestPrintListener` | yes | Same lifecycle contract as TransactionListener. |
-
+Print a no-op test slip on the terminal's printer. Useful for installation validation and printer-paper checks. Allocates an `event_id` and delivers result via listener.
 
 ## Returns
 
-void (result delivered via listener).
+`void`.
 
 ## Delivery model
 
-Asynchronous via TestPrintListener.
+Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport.
-- **`SdkError.NotConnected`** — No link.
+- **`SdkError.InvalidInput`** — Listener invariants violated.
 - **`SdkError.OperationInProgress`** — Concurrent op.
-- **`SdkError.TransportUnavailable`** — Cannot bind.
+- **`SdkError.NotSupported`** — Active transport does not support test_print (today: only AppToApp).
+- **`SdkError.TransportUnavailable`** — Active transport cannot be reached.
 
 ## MUST
 
-_(no positive obligations beyond the signature)_
+- Disable trigger control on `onStarted`, re-enable on terminal-state callback.
+- On Android, dispatch off the main thread.
 
 ## MUST NOT
 
-_(no anti-patterns specific to this API)_
+- Do not block in any callback.
 
 ## Transport support matrix
 
@@ -68,14 +60,14 @@ sdk.testPrint(object : TestPrintListener {
 ### Android (Java) — shipping
 
 ```java
-sdk.testPrint(new TestPrintListener() { /* … */ });
+sdk.testPrint(new TestPrintListener() {
+    @Override public void onStarted(String e) { }
+    @Override public void onSuccess(String e) { }
+    @Override public void onFailure(SdkException ex) { }
+});
 ```
 
 ### JVM (Kotlin) — shipping
-
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
 
 ```kotlin
 sdk.testPrint(object : TestPrintListener {
@@ -88,7 +80,11 @@ sdk.testPrint(object : TestPrintListener {
 ### JVM (Java) — shipping
 
 ```java
-sdk.testPrint(new TestPrintListener() { /* … */ });
+sdk.testPrint(new TestPrintListener() {
+    @Override public void onStarted(String e) { }
+    @Override public void onSuccess(String e) { }
+    @Override public void onFailure(SdkException ex) { }
+});
 ```
 
 ### Swift (iOS) — roadmap
@@ -96,7 +92,7 @@ sdk.testPrint(new TestPrintListener() { /* … */ });
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-try sdk.testPrint(listener: listener)
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -104,7 +100,7 @@ try sdk.testPrint(listener: listener)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-sdk.test_print(listener)
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -112,7 +108,7 @@ sdk.test_print(listener)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-sdk.testPrint(listener);
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -120,18 +116,15 @@ sdk.testPrint(listener);
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_test_print(sdk, &listener, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `TestPrintListener`, `SdkError`
-- Concepts: `lifecycle`, `capabilities`
+- Concepts: `threading`, `lifecycle`, `capabilities`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

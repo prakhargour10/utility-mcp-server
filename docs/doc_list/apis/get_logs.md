@@ -1,27 +1,20 @@
 # API: `get_logs`
 
-> **AI INSTRUCTIONS:** This file describes the public method `get_logs` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `get_logs` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
 ```
-get_logs() -> TerminalLogs
+TerminalLogs get_logs()
 ```
 
 ## Purpose
 
 Pull a snapshot of terminal-side logs.
 
-## Parameters
-
-_None._
-
-
 ## Returns
 
-TerminalLogs{lines[]} — raw lines as the terminal reported them.
+`TerminalLogs`.
 
 ## Delivery model
 
@@ -29,18 +22,16 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport.
-- **`SdkError.NotConnected`** — No link.
-- **`SdkError.Timeout`** — No reply.
-- **`SdkError.TransportError`** — Link failure.
+- **`SdkError.NotSupported`** — All v1 transports raise this.
+- **`SdkError.NotConnected`** — No active link.
 
 ## MUST
 
-- Treat lines as opaque diagnostic strings.
+- Skip in v1 — every transport raises NotSupported.
 
 ## MUST NOT
 
-- Do not parse for PII; assume content is safe-by-source but never leak verbatim to end users.
+- Do not log returned lines to a non-secure sink.
 
 ## Transport support matrix
 
@@ -67,10 +58,6 @@ TerminalLogs logs = sdk.getLogs();
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
 val logs: TerminalLogs = sdk.getLogs()
 ```
@@ -86,7 +73,7 @@ TerminalLogs logs = sdk.getLogs();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-let logs = try sdk.getLogs()
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -94,7 +81,7 @@ let logs = try sdk.getLogs()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-logs = sdk.get_logs()
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -102,7 +89,7 @@ logs = sdk.get_logs()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-const logs = sdk.getLogs();
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -110,18 +97,15 @@ const logs = sdk.getLogs();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_get_logs(sdk, &out, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `TerminalLogs`, `SdkError`
-- Concepts: `capabilities`
+- Concepts: `capabilities`, `error-handling`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

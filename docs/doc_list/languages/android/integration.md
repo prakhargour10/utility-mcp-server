@@ -1,148 +1,75 @@
-# Language: Android — Integration
+# Android — Integration (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** Use this file to wire the SDK into a real Android app. The patterns below are mandatory; thread / Context / lifecycle bugs are the most common integration failures.
+> **AI INSTRUCTIONS:** Treat the threading and lifecycle rules as normative. Do NOT call SDK methods on the main thread inside generated code. Do NOT touch UI from inside listener callbacks without marshalling.
 
-## SDK construction
+## Threading
 
-```kotlin
-import android.content.Context
-import com.pinelabs.billing.sdk.PineBillingSdk
-import uniffi.pine_billing.AppToAppConfig
-import uniffi.pine_billing.SdkConfig
-import uniffi.pine_billing.TransportType
-
-val config = SdkConfig(
-    defaultTimeoutMs = 60_000u,
-    logLevel = null,
-    transport = TransportType.APP_TO_APP,
-    appToApp = AppToAppConfig(userId = "POS-USER", version = "1.0"),
-    applicationId = BuildConfig.PINELABS_APP_ID,
-    cloud = null,
-    padController = null,
-)
-
-// Android façade signature: (Context, SdkConfig, PlatformBridge? = null).
-// The MasterAppTransport bridge is auto-built from `config.appToApp` and
-// `config.applicationId`. Pass an AndroidSystemBridge as the third
-// argument only if you intend to call sdk.restart() on PADController.
-val sdk = PineBillingSdk(applicationContext, config)
-```
-
-Construct **once per process** and reuse — closing and re-opening per
-transaction is wrong (it tears down Rust-side capability state).
-
-## Transport selection
-
-```kotlin
-// Initial transport comes from SdkConfig.transport.
-// To switch at runtime:
-sdk.setTransport(TransportType.CLOUD)
-```
-
-`set_transport` requires that the matching sub-config was supplied at
-construction (e.g. `cloud: CloudConfig` if you'll later switch to
-Cloud).
+- `PineBillingSdk` enforces an Android main-thread guard on every blocking call. Calling from `Dispatchers.Main` throws `IllegalStateException`.
+- Listener callbacks (`TransactionListener`, `TestPrintListener`, `DiscoveryListener`) fire on an **SDK-internal worker thread**. Never touch UI directly — marshal to main first.
+- Callbacks are serialised; they will not overlap for one operation.
+- Calling another SDK method from inside a callback is **unsafe** (same worker; deadlock risk). Marshal to a fresh executor before re-entering the SDK.
 
 ## Lifecycle
 
-| Hook | What to do |
-|---|---|
-| `Application.onCreate()` | Construct the SDK; hold it in a singleton. |
-| `Activity.onCreate()` | Acquire the singleton; do NOT construct here. |
-| `onDestroy()` of the last Activity | Nothing — the SDK is a process-scoped singleton. |
-| Process death | The SDK's in-memory state is lost; use `check_status` (Cloud) for reconciliation. |
+- Construct ONCE per process, in `Application.onCreate()`. Reuse the instance.
+- The façade is `AutoCloseable`. Closing is generally NOT required for the lifetime of the process; close on test teardown only.
 
-## Threading (mandatory)
+## `applicationId` provisioning
 
-Every blocking method on `PineBillingSdk` throws
-`IllegalStateException` if called on the Android main thread. Dispatch
-from a background context:
+- Read from `BuildConfig.PINELABS_APP_ID`, populated by `~/.gradle/gradle.properties` or the `PINELABS_APP_ID` env var. **Fail fast** during configuration if unset:
 
 ```kotlin
-// Coroutines (recommended)
-lifecycleScope.launch(Dispatchers.IO) {
-    runCatching { sdk.doTransaction(request, listener) }
-        .onFailure { /* surface error */ }
-}
-
-// Or an Executor
-val io = Executors.newSingleThreadExecutor()
-io.execute { sdk.doTransaction(request, listener) }
+val pinelabsAppId = (project.findProperty("PINELABS_APP_ID") as String?)
+    ?: System.getenv("PINELABS_APP_ID")
+    ?: error("PINELABS_APP_ID not set (use ~/.gradle/gradle.properties or env)")
 ```
 
-Listener callbacks fire on the SDK's worker thread. Marshal back to
-the main thread before touching the UI:
+- Never hardcode the production application id in source. Sandbox value is `1001`.
+
+## Java interop
+
+The UDL emits `kotlin.UInt` / `kotlin.ULong` for unsigned wire fields. Java cannot construct these directly. Add this helper to your codebase **once**:
 
 ```kotlin
-override fun onSuccess(result: TransactionResult) {
-    Handler(Looper.getMainLooper()).post {
-        Toast.makeText(context, "OK ${result.eventId}", Toast.LENGTH_LONG).show()
+package com.merchant.pos
+
+/**
+ * Java interop helper for UniFFI-generated `kotlin.UInt` / `kotlin.ULong` parameters.
+ * UniFFI emits these as Kotlin's unsigned types, which Java cannot construct directly.
+ * This helper bridges with explicit range checks.
+ */
+object Unsigned {
+    @JvmStatic
+    fun toUInt(value: Long): UInt {
+        require(value in 0L..0xFFFF_FFFFL) { "value $value does not fit in u32" }
+        return value.toInt().toUInt()
+    }
+
+    @JvmStatic
+    fun toULong(value: Long): ULong {
+        require(value >= 0L) { "value $value is negative; cannot be u64" }
+        return value.toULong()
     }
 }
 ```
 
-See `concepts/threading.md` for the full contract.
+In Java, write `Unsigned.toUInt(60_000L)` and `Unsigned.toULong(19_900L)`. **Do NOT** use `Integers.toUInt` (does not exist) or `kotlin.UInt.constructor-impl` (internal, version-locked, breaks on Kotlin upgrades).
 
-## Foreground service (recommended)
+## Persisting `event_id`
 
-A card transaction can take up to 245 s (cardholder PIN entry). If the
-user backgrounds the app mid-transaction the OS may kill the process.
-Wrap the call in a foreground service:
+Inside `TransactionListener.onStarted(eventId)` you MUST persist the id durably **before returning**. The SDK relies on the merchant to remember in-flight ids across crashes. Synchronous Room DAO writes are safe inside the callback. LiveData/Flow main-thread observers are not — marshal to main first.
 
-```kotlin
-class TransactionService : Service() {
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildOngoingNotification())
-        Thread {
-            try { sdk.doTransaction(request, listener) }
-            finally { stopSelf() }
-        }.start()
-        return START_NOT_STICKY
-    }
-    override fun onBind(intent: Intent?): IBinder? = null
-}
-```
+## Cloud `transaction_id`
 
-## AppToApp `application_id` provisioning
+For Cloud transactions, also persist `TransactionResult.transaction_id` (the `PlutusTransactionReferenceID`). It is the parameter to Cloud `cancel`/`check_status`, NOT the SDK `event_id`.
 
-`SdkConfig.applicationId` is a Pinelabs-provisioned identifier
-forwarded as `Header.ApplicationId`; the upstream PoS service rejects
-DoTransaction calls (`MethodId="1001"`) with an unknown id.
+## ProGuard / R8
 
-* Source it from `BuildConfig` populated from a non-VCS secrets file.
-* NEVER inline it in Kotlin source.
-* In production, `appToApp.version` MUST be `"1.0"`.
+The AAR ships `consumer-rules.pro`; you do NOT need to copy it into your app. If you have R8 enabled and see `ClassNotFoundException: uniffi.pine_billing.…` at runtime, see `errors.md` § "ProGuard / R8 stripped UniFFI bindings".
 
-```kotlin
-// gradle.properties (NOT in VCS)
-PINELABS_APP_ID=…the value Pinelabs gave you…
+## What NOT to do
 
-// build.gradle.kts
-buildConfigField("String", "PINELABS_APP_ID",
-    "\"${project.findProperty("PINELABS_APP_ID")}\"")
-```
-
-## Restart support (PADController only)
-
-If you've selected `TransportType.PAD_CONTROLLER` and you want
-`sdk.restart()` to work, supply an `AndroidSystemBridge` at
-construction:
-
-```kotlin
-val bridge = AndroidSystemBridge(
-    context = applicationContext,
-    restartIntent = Intent("com.pinelabs.padcontroller.ACTION_RESTART").apply {
-        setPackage("com.pinelabs.padcontroller")
-    },
-    deliveryMode = AndroidSystemBridge.DeliveryMode.BROADCAST,
-)
-val sdk = PineBillingSdk(applicationContext, config, bridge)
-```
-
-The exact intent action / package / delivery mode is OEM-specific —
-consult your terminal vendor.
-
-## Next docs
-
-`android/examples`, `android/errors`, `android/distribution`,
-`concepts/threading`, `concepts/lifecycle`.
+- Do not block on the main thread; the façade throws.
+- Do not invoke UI APIs from listener callbacks without `Dispatchers.Main.dispatch`.
+- Do not log card data, full PAN, PIN, CVV, or `securityToken`. `masked_pan` is debug-level only.
+- Do not mutate `SdkConfig` after construction — pass a fresh config and reconstruct.

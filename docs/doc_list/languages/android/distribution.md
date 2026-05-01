@@ -1,62 +1,48 @@
-# Language: Android — Distribution
+# Android — Distribution (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** When the user asks "where do I download the AAR?", reply with the truth: there is no public Maven coordinate yet. Direct file drop only.
+> **AI INSTRUCTIONS:** When the user asks "how do I receive the SDK", describe the wrapper-zip layout exactly as below. Do NOT mention Maven Central or JitPack — the SDK is NOT published to public registries.
 
-## Where to obtain the AAR
+## Artifact
 
-The AAR is delivered directly by Pinelabs onboarding. Typical channels:
-
-* Pinelabs partner portal,
-* email from a Pinelabs solutions engineer,
-* a private S3 / Artifactory bucket your contract entitles you to.
-
-Filename for this release:
+You receive `android-kotlin-0.5.0-preview.2.zip` directly from your Pinelabs onboarding contact.
 
 ```
-pine-billing-sdk-0.5.0-preview.2.aar
+android-kotlin-0.5.0-preview.2/
+  payload/
+    pine-billing-sdk-0.5.0-preview.2.aar           # the AAR you copy into app/libs/
+  README.md                                       # quick install
+  CHANGELOG.md                                    # version-to-version diff
+  LICENSE.txt                                     # SDK licence
+  METADATA.json                                   # version, sha256, build timestamp
+  THIRD_PARTY_NOTICES.md                          # OSS attributions for bundled libs
 ```
 
-There is **no** publicly reachable Maven coordinate yet — do not
-generate snippets like `implementation("com.pinelabs:pine-billing-sdk:…")`
-in this release.
+## Verification
 
-## License
-
-Proprietary — Pinelabs internal-use license. See the `LICENSE` file
-that accompanies the artifact. Do not redistribute.
-
-## Verifying the artifact
-
-Pinelabs publishes a SHA-256 alongside the AAR. Pin it in your build:
-
-```kotlin
-// settings.gradle.kts
-dependencyResolutionManagement {
-    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-}
-```
+Compute the SHA-256 of `payload/pine-billing-sdk-0.5.0-preview.2.aar` and compare against the value in `METADATA.json` before installing.
 
 ```bash
-# CI gate
-sha256sum app/libs/pine-billing-sdk-0.5.0-preview.2.aar
-# Compare against the value Pinelabs published.
+shasum -a 256 payload/pine-billing-sdk-0.5.0-preview.2.aar
 ```
 
-## Version pinning
+## What's bundled inside the AAR
 
-* Pin to **the exact version** (`0.5.0-preview.2`).
-* Pre-1.0 minor bumps may break source compatibility — re-read
-  `concepts/versioning-and-support.md` before upgrading.
-* Do NOT use floating constraints like `+`, `[…,…)`, or `latest.release`.
+- Rust `cdylib` (`libuniffi_pine_billing.so` for `arm64-v8a` and `armeabi-v7a`).
+- UniFFI-generated Kotlin bindings (`uniffi.pine_billing.*`).
+- The Pine Billing SDK Android façade (`com.pinelabs.billing.sdk.*`).
+- `consumer-rules.pro` with R8 keep rules (note: typo in 0.5.0-preview.2; see `errors.md`).
 
-## Roadmap
+## What's NOT bundled (you must declare)
 
-| Channel | Coordinate (planned) | Status |
-|---|---|---|
-| Maven Central | `com.pinelabs:pine-billing-sdk:<ver>` | Not in `0.5.0-preview.2`. ETA TBD. |
-| Pinelabs private Maven | (varies by contract) | Talk to your account team. |
+- `net.java.dev.jna:jna:5.14.0@aar`
+- `com.google.code.gson:gson:2.11.0`
 
-## Next docs
+See `setup.md` for the exact `dependencies {}` block.
 
-`concepts/distribution`, `concepts/versioning-and-support`,
-`android/setup`.
+## No telemetry / no phone-home
+
+The SDK writes no durable state to disk and makes no outbound network calls beyond the configured transport. Adding network monitoring around the AAR will not surface unexpected traffic.
+
+## Upgrades
+
+Drop the new wrapper zip's AAR in place, bump the version in `app/build.gradle.kts`, and re-run the first-run sanity check (`errors.md`). Pre-1.0 minor bumps may include breaking API changes; read `CHANGELOG.md` first.

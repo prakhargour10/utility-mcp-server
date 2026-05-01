@@ -4,30 +4,26 @@
 
 ## Purpose
 
-Operation kind. Individual transports may reject types they don't support (returns SdkError.NotSupported).
+The kind of terminal-side operation. v1 ships all six; individual transports may reject types they don't support.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
 | `Sale` | Standard charge. |
-| `Refund` | Reverse a previous Sale; original_event_id required. |
-| `Void` | Reverse before settlement; original_event_id required. |
-| `PreAuth` | Reserve funds; settle later via Capture. |
-| `Capture` | Settle a prior PreAuth; original_event_id required. |
-| `BalanceInquiry` | Read balance; not all transports support this. |
+| `Refund` | Requires `original_event_id`. |
+| `Void` | Requires `original_event_id`. |
+| `PreAuth` | Pre-authorisation hold. |
+| `Capture` | Capture against a prior PreAuth. Requires `original_event_id`. |
+| `BalanceInquiry` | Card balance check. |
 
 ## MUST
 
-- Set TransactionRequest.original_event_id iff value ∈ {Refund, Void, Capture}.
-
-## MUST NOT
-
-- Do not set original_event_id for Sale, PreAuth, BalanceInquiry.
+- `original_event_id` is required for `Refund` / `Void` / `Capture`; rejected for `Sale` / `PreAuth` / `BalanceInquiry`.
 
 ## Cross-references
 
-`TransactionRequest`, `SdkError`
+`TransactionRequest`, `apis/do_transaction`
 
 ## Per-language naming
 

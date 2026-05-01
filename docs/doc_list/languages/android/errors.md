@@ -1,102 +1,47 @@
-# Language: Android — Errors (root-cause-indexed)
+# Android — Errors & First-run Sanity (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** When the user reports a runtime error, look it up in this table FIRST before generating any fix. Each row is keyed by the symptom the merchant sees in `logcat` or a stack trace.
+> **AI INSTRUCTIONS:** When the user reports an error from this list, use the "Cause" and "Fix" columns verbatim. Do NOT invent alternate explanations.
 
-## Common runtime failures
+## First-run sanity check
 
-### `java.lang.UnsatisfiedLinkError: dlopen failed: library "libuniffi_pine_billing.so" not found`
+After a clean integration, run the build and a single Sale once. If anything goes wrong, match the error to a row in the table; the cause is almost always a configuration miss, not an SDK bug.
 
-**Root cause:** The native library was stripped from the APK or the
-device's ABI is not in the AAR.
+| # | Symptom | Where | Cause | Fix |
+|---|---|---|---|---|
+| 1 | `Unresolved reference: BuildConfig` | compile | AGP 8+ disables `BuildConfig` by default. | Add `buildFeatures { buildConfig = true }`. |
+| 2 | `Could not find net.java.dev.jna:jna:5.14.0` | resolve | Missing JNA dependency. | Add `implementation("net.java.dev.jna:jna:5.14.0@aar")`. **Do not drop `@aar`** — the plain JAR variant is not Android-compatible. |
+| 3 | `java.lang.UnsatisfiedLinkError: dlopen failed: library "libjnidispatch.so" not found` | runtime | Used JNA plain JAR instead of `@aar`. | Switch dependency to `net.java.dev.jna:jna:5.14.0@aar`. |
+| 4 | `java.lang.UnsatisfiedLinkError: dlopen failed: "libuniffi_pine_billing.so" not found` | runtime | Running on x86 / x86_64 emulator. AAR ships arm64-v8a + armeabi-v7a only. | Use a real arm64 device or an `arm64-v8a` emulator image. |
+| 5 | Build fails with `2 files found with path 'lib/arm64-v8a/libc++_shared.so'` | merge | JNA AAR and the SDK AAR both ship `libc++_shared.so`. | `android.packaging.jniLibs.pickFirsts += "**/libc++_shared.so"`. |
+| 6 | `kotlinOptions can not be applied` (AGP 9) | configure | `kotlinOptions { jvmTarget = "17" }` is removed in AGP 9. | Use `kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }`. |
+| 7 | `IllegalStateException: PineBillingSdk method called from main thread` | runtime | Called `do_transaction` / `connect` / `cancel` / etc. on `Dispatchers.Main`. | Wrap the call in `withContext(Dispatchers.IO) { … }`. |
+| 8 | `error: cannot find symbol: kotlin.UInt.constructor-impl` (Java) | compile | Tried to construct `kotlin.UInt`/`ULong` directly from Java. | Use the `Unsigned` helper (`com.merchant.pos.Unsigned.toUInt(...)` / `toULong(...)`). |
 
-**Fix:**
+## SdkError variants → triage
 
-1. Confirm the AAR was placed under `app/libs/` and `implementation(files("libs/pine-billing-sdk-0.5.0-preview.2.aar"))` is in the dependency block.
-2. The AAR ships only `arm64-v8a` and `armeabi-v7a`. Emulator images
-   targeting `x86` / `x86_64` are unsupported in `0.5.0-preview.2`.
-3. If you use `splits` or `abiFilters`, ensure `arm64-v8a` (and
-   `armeabi-v7a` if you target older devices) is included.
-4. Do NOT use `useLegacyPackaging = true` for `jniLibs` — it confuses
-   `System.loadLibrary` on some OEM ROMs.
+| Variant | Likely cause | Action |
+|---|---|---|
+| `InvalidInput(detail)` | Configuration or `TransactionRequest` violates a documented rule. | Read `detail`. Common: missing `transport_options.Cloud`, mismatched `transport_options` variant, `currency` not 3-uppercase ASCII, `original_event_id` mismatch. |
+| `OperationInProgress(eventId)` | An earlier op has not finished. | Wait for the listener's terminal-state callback before re-issuing. |
+| `NotConnected` | Active transport requires a prior `connect()`. | Today only reachable on PADController if you haven't called `connect()`. |
+| `TransportUnavailable(detail)` | Active transport cannot be reached. | AppToApp: confirm `com.pinelabs.masterapp` is installed and `<queries>` block is present. PADController: confirm the upstream daemon is running on `127.0.0.1:8082`. |
+| `NotSupported` | The active transport does not implement this method (see capability matrix). | Switch transport, or remove the call. |
+| `Timeout` | No reply within budget. | On Cloud, follow up with `check_status`. |
+| `TransactionFailed` | Terminal returned a non-success code. | Surface `failure_detail` and `terminal_response_code` to the merchant. |
+| `Cancelled` | Caller-initiated cancel succeeded mid-flight (Cloud). | Re-check via `check_status` to confirm state. |
+| `Network` / `ConnectionTimeout` / `ReadTimeout` / `NonSuccessHttp` | Cloud HTTP-layer failures. | Retry-with-idempotency or `check_status`. |
+| `TransportError(detail)` | Transport-layer fault. | Inspect `detail`; on PADController this often means the daemon dropped the link. |
+| `Internal(detail)` | SDK defect. | File an issue with `detail`, the operation, and the active transport. |
 
-### `java.lang.IllegalStateException: PineBillingSdk.doTransaction() must not be called from the Android main thread`
+## ProGuard / R8 stripped UniFFI bindings
 
-**Root cause:** The façade's main-thread guard fired. You called a
-blocking SDK method from the UI thread.
+If you have R8 enabled and see `ClassNotFoundException: uniffi.pine_billing.…` at runtime, the consumer rules shipped inside the AAR have a known typo (they reference `uniffi.pine_billing_sdk.**`). Until the next preview, add this to your app's `proguard-rules.pro`:
 
-**Fix:** Dispatch from `Dispatchers.IO`, an `Executor`, or a
-`WorkManager` worker. See `android/integration.md` § Threading.
-
-### `bindService(...)` returns `false` (visible as `SdkException.TransportUnavailable`)
-
-**Root cause (Android 11+):** Missing `<queries>` block in
-`AndroidManifest.xml`. `PackageManager` filters out packages your app
-hasn't declared visibility for, so `bindService` cannot resolve the
-upstream PoS package.
-
-**Fix:** Add the `<queries>` block from `android/setup.md` § 3.
-
-**Other root causes:**
-
-* The upstream Pinelabs PoS package is not installed on the device.
-* The `applicationId` you supplied is not provisioned for this device.
-* `appToApp.version` is not `"1.0"`.
-
-### `SdkException.NotSupported: …`
-
-**Root cause:** The active transport doesn't implement the called
-capability in v1. See `concepts/capabilities.md`.
-
-**Fix:** Either (a) `setTransport(...)` to one that does, or (b)
-remove the call. Most commonly: PADController v1 implements only
-`do_transaction` + probe-style `connect`/`disconnect`/`is_connected` +
-`restart`. Everything else (`cancel`, `check_status`, `test_print`,
-discovery, diagnostics) raises `NotSupported`.
-
-### Listener callback never fires; logs say nothing
-
-**Root cause:** R8 / ProGuard stripped your listener's methods. The
-SDK invokes them via UniFFI's reflection-style dispatch.
-
-**Fix:** Add the keep rules from `android/setup.md` § 4. Verify by
-running a `release` build with `-printusage` and confirming your
-listener class is retained.
-
-### `SdkException.OperationInProgress(activeEventId)`
-
-**Root cause:** You called `doTransaction` / `testPrint` /
-`discoverTerminals` while another listener-style op is in flight on
-the same SDK instance.
-
-**Fix:** Disable the trigger control on `onStarted`, re-enable on
-`onSuccess` / `onFailure`. If you need to abort, call
-`cancel(activeEventId, ...)` (Cloud only — see capability matrix).
-
-### `SdkException.TransportUnavailable("…AAR…native lib…")`
-
-**Root cause:** Native lib loaded but the upstream service couldn't be
-bound. Often: testing on an emulator, or device booted without the
-PoS service.
-
-**Fix:** Run on a real Pinelabs-paired device. Check `adb shell pm
-list packages | grep pinelabs`.
-
-## How to capture diagnostics
-
-```kotlin
-catch (e: SdkException) {
-    Log.e("PineBilling",
-        "variant=${e::class.simpleName} msg=${e.message}", e)
-}
+```
+-keep class uniffi.pine_billing.** { *; }
+-keep class com.pinelabs.billing.sdk.** { *; }
 ```
 
-NEVER log:
+## Where the listener callbacks come from
 
-* `request.metadata`,
-* `result.maskedPan` above debug,
-* `cloudConfig.securityToken` or any per-call security token,
-* card data, PIN, or full PAN.
-
-## Next docs
-
-`android/distribution`, `concepts/error-handling`, `models/SdkError`.
+If you set a breakpoint inside `TransactionListener.onSuccess` and inspect the thread name, you'll see `pine-billing-sdk-worker`. That is expected. Marshal to `Dispatchers.Main` before touching UI.

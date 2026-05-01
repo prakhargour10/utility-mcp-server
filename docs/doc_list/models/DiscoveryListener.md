@@ -1,34 +1,22 @@
-# Model: `DiscoveryListener` (callback)
+# Model: `DiscoveryListener` (callback interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Callback for discover_terminals. on_terminal_found may fire 0..N times.
+Callback for `discover_terminals`. `on_terminal_found` may fire 0..N times. Exactly one terminal-state callback (`on_completed` or `on_failure`) fires per discovery.
 
 ## Methods
 
-| Name | Signature | Notes |
-|---|---|---|
-| `on_terminal_found` | `void on_terminal_found(Terminal terminal)` | One per terminal. |
-| `on_completed` | `void on_completed()` | Discovery ended cleanly. |
-| `on_failure` | `void on_failure(SdkError error)` | Discovery aborted. |
-
-## MUST
-
-- Callbacks are serialised — no two callbacks fire concurrently on the same listener.
-- Callbacks are NEVER fired on the caller's stack frame; they come from an SDK-internal worker thread.
-- Marshal to the platform UI thread before touching UI elements.
-- MUST NOT block in any callback.
-- Exactly one of on_completed / on_failure ends the scan.
-
-## MUST NOT
-
-- Do not start a new discovery before on_completed/on_failure of the previous.
+| Name | Signature |
+|---|---|
+| `on_terminal_found` | `on_terminal_found(Terminal terminal)` |
+| `on_completed` | `on_completed()` |
+| `on_failure` | `on_failure(SdkError error)` |
 
 ## Cross-references
 
-`discover_terminals`, `Terminal`, `SdkError`
+`Terminal`, `apis/discover_terminals`, `concepts/threading`
 
 ## Per-language naming
 

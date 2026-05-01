@@ -4,30 +4,22 @@
 
 ## Purpose
 
-Lifecycle state returned by check_status.
+Lifecycle state of an operation tracked by `event_id`. Returned via `check_status`.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
-| `Pending` | SDK accepted, not yet handed to transport. |
-| `InFlight` | Transport accepted; awaiting terminal. |
-| `Completed` | Terminal returned success; OperationStatus.result set. |
-| `Failed` | Terminal failure or transport mid-stream failure. |
-| `Cancelled` | Caller cancelled and op did not commit. |
-| `Unknown` | SDK has no record of this event_id (process restart, or id never allocated here). |
-
-## MUST
-
-- Treat Unknown as a valid recovery answer, not an error.
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `Pending` | SDK accepted the call but has not yet handed it to the transport. |
+| `InFlight` | Transport accepted the call; awaiting the terminal reply. |
+| `Completed` | Terminal returned success. `OperationStatus.result` is set. |
+| `Failed` | Terminal returned failure or transport failed mid-stream. |
+| `Cancelled` | Caller cancelled the op and it did not commit. |
+| `Unknown` | SDK has no record of this `event_id`. Valid recovery answer. |
 
 ## Cross-references
 
-`OperationStatus`, `check_status`
+`OperationStatus`, `apis/check_status`, `concepts/eventid-and-reconciliation`
 
 ## Per-language naming
 

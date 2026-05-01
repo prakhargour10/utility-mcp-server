@@ -1,33 +1,22 @@
-# Model: `TestPrintListener` (callback)
+# Model: `TestPrintListener` (callback interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Callback for test_print. Same threading and ordering contract as TransactionListener.
+Callback for `test_print`. Same threading and ordering contract as `TransactionListener`.
 
 ## Methods
 
 | Name | Signature | Notes |
 |---|---|---|
-| `on_started` | `void on_started(string event_id)` |  |
-| `on_success` | `void on_success(string event_id)` | Carries the same event_id. |
-| `on_failure` | `void on_failure(SdkError error)` |  |
-
-## MUST
-
-- Callbacks are serialised — no two callbacks fire concurrently on the same listener.
-- Callbacks are NEVER fired on the caller's stack frame; they come from an SDK-internal worker thread.
-- Marshal to the platform UI thread before touching UI elements.
-- MUST NOT block in any callback.
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `on_started` | `on_started(string event_id)` | Fires once with the SDK-allocated event_id. |
+| `on_success` | `on_success(string event_id)` | Print job completed at the terminal. |
+| `on_failure` | `on_failure(SdkError error)` | |
 
 ## Cross-references
 
-`test_print`, `SdkError`
+`apis/test_print`, `SdkError`, `concepts/threading`
 
 ## Per-language naming
 

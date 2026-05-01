@@ -4,29 +4,21 @@
 
 ## Purpose
 
-A terminal advertised by discover_terminals.
+A terminal advertised by `discover_terminals`. Identifier shape is transport-dependent.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `id` | `string` | yes | Transport-dependent shape: TCP host:port, BT MAC, USB device path, …. |
-| `transport` | `TransportType` | yes | Always equals the active transport at discovery time. |
-| `display_name` | `string?` | no |  |
-| `model` | `string?` | no |  |
-| `serial_number` | `string?` | no |  |
-
-## MUST
-
-- Pass the same Terminal back to connect().
-
-## MUST NOT
-
-- Do not construct Terminals by hand for transports that require discovery.
+| `id` | `string` | yes | TCP host:port, BT MAC, USB device path, etc. |
+| `transport` | `TransportType` | yes | Always equals the active transport. |
+| `display_name` | `string?` | no | |
+| `model` | `string?` | no | |
+| `serial_number` | `string?` | no | |
 
 ## Cross-references
 
-`discover_terminals`, `connect`, `TransportType`
+`DiscoveryListener`, `apis/discover_terminals`, `apis/connect`
 
 ## Per-language naming
 

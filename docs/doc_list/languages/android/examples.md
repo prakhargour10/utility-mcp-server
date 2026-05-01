@@ -1,195 +1,179 @@
-# Language: Android — Examples
+# Android — Examples (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** Use the patterns below verbatim where possible. Do NOT swap the imports for `uniffi.pine_billing.PineBillingSdk` — Android merchants must use the `com.pinelabs.billing.sdk.PineBillingSdk` façade so the main-thread guard fires.
+> **AI INSTRUCTIONS:** Compose-by-default. Always disable the trigger control on `onStarted` and re-enable on a terminal-state callback. Always marshal to `Dispatchers.Main` before touching UI from inside listener callbacks.
 
-## Full doTransaction example — Kotlin
+## Compose: a Sale screen
 
 ```kotlin
 package com.merchant.pos
 
-import android.content.Context
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
-import android.widget.Button
-import android.widget.Toast
-import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.lifecycleScope
-import com.pinelabs.billing.sdk.PineBillingSdk
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import uniffi.pine_billing.AppToAppConfig
-import uniffi.pine_billing.SdkConfig
-import uniffi.pine_billing.SdkException
-import uniffi.pine_billing.TransactionListener
-import uniffi.pine_billing.TransactionRequest
-import uniffi.pine_billing.TransactionResult
-import uniffi.pine_billing.TransactionType
-import uniffi.pine_billing.TransportType
+import kotlinx.coroutines.withContext
+import com.pinelabs.billing.sdk.PineBillingSdk
+import uniffi.pine_billing.*
 
-class ChargeActivity : AppCompatActivity() {
+class CheckoutViewModel(app: android.app.Application) : AndroidViewModel(app) {
+    private val sdk: PineBillingSdk get() = (getApplication<PineBillingApp>()).sdk
 
-    private val sdk: PineBillingSdk by lazy {
-        PineBillingSdk(
-            applicationContext,
-            SdkConfig(
-                defaultTimeoutMs = 60_000u,
-                logLevel = null,
-                transport = TransportType.APP_TO_APP,
-                appToApp = AppToAppConfig(userId = "POS-USER", version = "1.0"),
-                applicationId = BuildConfig.PINELABS_APP_ID,
-                cloud = null,
-                padController = null,
-            ),
-        )
-    }
+    var inFlight by mutableStateOf(false); private set
+    var lastResult by mutableStateOf<TransactionResult?>(null); private set
+    var lastError by mutableStateOf<String?>(null); private set
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContentView(R.layout.activity_charge)
-
-        val charge = findViewById<Button>(R.id.charge)
-        charge.setOnClickListener { onChargeClicked(charge) }
-    }
-
-    private fun onChargeClicked(button: Button) {
-        button.isEnabled = false
+    fun startSale(amountPaise: ULong, invoice: String) {
+        if (inFlight) return
+        inFlight = true; lastResult = null; lastError = null
         val request = TransactionRequest(
-            amount = 19_900uL,
+            amount = amountPaise,
             currency = "INR",
-            billingRefNo = "INV-2025-001",
-            invoiceNo = "INV-2025-001",
+            billingRefNo = invoice,
+            invoiceNo = invoice,
             transactionType = TransactionType.SALE,
             originalEventId = null,
-            referenceId = "order-${System.currentTimeMillis()}",
+            referenceId = null,
             metadata = null,
             merchantId = null,
             terminalId = null,
             allowedPaymentModes = null,
             transportOptions = null,
         )
-        val listener = object : TransactionListener {
-            override fun onStarted(eventId: String) {
-                // Persist eventId against the merchant order id BEFORE returning.
-            }
-            override fun onSuccess(result: TransactionResult) {
-                postToUi {
-                    button.isEnabled = true
-                    Toast.makeText(this@ChargeActivity,
-                        "Charged: ${result.eventId}", Toast.LENGTH_LONG).show()
-                }
-            }
-            override fun onFailure(error: SdkException) {
-                postToUi {
-                    button.isEnabled = true
-                    Toast.makeText(this@ChargeActivity,
-                        "Failed: ${error::class.simpleName}", Toast.LENGTH_LONG).show()
-                }
-            }
-        }
-
-        // CRITICAL: dispatch off the main thread; the façade's guard
-        // throws IllegalStateException otherwise.
-        lifecycleScope.launch(Dispatchers.IO) {
+        viewModelScope.launch(Dispatchers.IO) {
             try {
-                sdk.doTransaction(request, listener)
+                sdk.doTransaction(request, object : TransactionListener {
+                    override fun onStarted(eventId: String) {
+                        // Persist eventId BEFORE returning. Synchronous Room writes are safe here.
+                    }
+                    override fun onSuccess(result: TransactionResult) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            lastResult = result; inFlight = false
+                        }
+                    }
+                    override fun onFailure(error: SdkException) {
+                        viewModelScope.launch(Dispatchers.Main) {
+                            lastError = error.message ?: error::class.simpleName
+                            inFlight = false
+                        }
+                    }
+                })
             } catch (e: SdkException) {
-                postToUi {
-                    button.isEnabled = true
-                    Toast.makeText(this@ChargeActivity,
-                        "Rejected: ${e.message}", Toast.LENGTH_LONG).show()
+                withContext(Dispatchers.Main) {
+                    lastError = e.message ?: e::class.simpleName
+                    inFlight = false
                 }
             }
         }
     }
+}
 
-    private fun postToUi(action: () -> Unit) =
-        Handler(Looper.getMainLooper()).post(action)
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                val vm: CheckoutViewModel = viewModel()
+                Column(Modifier.padding(24.dp)) {
+                    Text("POS Checkout", style = MaterialTheme.typography.headlineSmall)
+                    Spacer(Modifier.height(16.dp))
+                    Button(
+                        enabled = !vm.inFlight,
+                        onClick = { vm.startSale(amountPaise = 19_900uL, invoice = "INV-001") },
+                    ) { Text(if (vm.inFlight) "Awaiting terminal…" else "Charge ₹199.00") }
+
+                    vm.lastResult?.let { r ->
+                        Spacer(Modifier.height(24.dp))
+                        Text("Status: ${r.status}")
+                        r.transactionId?.let { Text("Txn id: $it") }
+                        r.maskedPan?.let { Text("PAN: $it") }      // debug only — never INFO
+                        r.amount?.let { Text("Amount: $it") }
+                    }
+                    vm.lastError?.let { Text("Error: $it") }
+                }
+            }
+        }
+    }
 }
 ```
 
-## Full doTransaction example — Java
+### Populated `TransactionResult` fields, by transport (Sale / Success)
+
+| Field | AppToApp | Cloud | PADController |
+|---|---|---|---|
+| `event_id` | ✓ SDK uuid | ✓ SDK uuid | ✓ SDK uuid |
+| `status` | ✓ | ✓ (`Pending` possible) | ✓ |
+| `transaction_id` | ✓ acquirer ref | ✓ `PlutusTransactionReferenceID` | ✓ when echoed |
+| `approval_code` | ✓ when present | ✓ when present | ✓ when present |
+| `masked_pan` | ✓ when present | ✓ when present | ✓ when present |
+| `card_brand` | ✓ when present | ✓ when present | ✓ when present |
+| `payment_mode` | ✓ when present | ✓ when present | ✓ when present |
+| `amount` | ✓ paise | ⚠ unit best-effort — see Notes | ✓ paise |
+| `terminal_response_code` | ✓ on failure | ✓ on failure | ✓ on failure |
+| `failure_detail` | ✓ on failure | ✓ on failure | ✓ on failure |
+| `cloud` (`CloudTransactionData`) | ✗ | ✓ when echoed | ✗ |
+
+> **Note (Cloud `amount`):** the upstream Cloud response sometimes returns the amount as the original wire string. The SDK best-effort-parses it back to paise; if the upstream field is malformed the SDK leaves `amount = null` and exposes the raw value via `cloud.raw_response`. Never trust `result.amount` for reconciliation on Cloud — use the merchant's own books.
+
+## Java sample (Sale)
 
 ```java
 package com.merchant.pos;
 
-import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
-import android.widget.Button;
-import android.widget.Toast;
-import androidx.appcompat.app.AppCompatActivity;
 import com.pinelabs.billing.sdk.PineBillingSdk;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import uniffi.pine_billing.AppToAppConfig;
-import uniffi.pine_billing.SdkConfig;
-import uniffi.pine_billing.SdkException;
-import uniffi.pine_billing.TransactionListener;
-import uniffi.pine_billing.TransactionRequest;
-import uniffi.pine_billing.TransactionResult;
-import uniffi.pine_billing.TransactionType;
-import uniffi.pine_billing.TransportType;
+import uniffi.pine_billing.*;
 
-public class ChargeActivity extends AppCompatActivity {
-
-    private PineBillingSdk sdk;
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private final Handler main = new Handler(Looper.getMainLooper());
-
-    @Override
-    protected void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        setContentView(R.layout.activity_charge);
-
-        SdkConfig config = new SdkConfig(
-            /*defaultTimeoutMs*/ kotlin.UInt.constructor-impl(60_000),
-            /*logLevel*/ null,
-            TransportType.APP_TO_APP,
-            new AppToAppConfig("POS-USER", "1.0"),
-            BuildConfig.PINELABS_APP_ID,
-            /*cloud*/ null,
-            /*padController*/ null
+public final class SaleJava {
+    public static void start(PineBillingSdk sdk, String invoice) {
+        TransactionRequest req = new TransactionRequest(
+            Unsigned.toULong(19_900L),
+            "INR", invoice, invoice,
+            TransactionType.SALE,
+            null, null, null, null, null, null, null
         );
-        sdk = new PineBillingSdk(getApplicationContext(), config, /*platformBridge*/ null);
-
-        Button charge = findViewById(R.id.charge);
-        charge.setOnClickListener(v -> onChargeClicked(charge));
-    }
-
-    private void onChargeClicked(Button button) {
-        button.setEnabled(false);
-        TransactionRequest request = /* build TransactionRequest as in the Kotlin example */ null;
-        TransactionListener listener = new TransactionListener() {
+        sdk.doTransaction(req, new TransactionListener() {
             @Override public void onStarted(String eventId) { /* persist */ }
-            @Override public void onSuccess(TransactionResult result) {
-                main.post(() -> {
-                    button.setEnabled(true);
-                    Toast.makeText(ChargeActivity.this,
-                        "Charged: " + result.getEventId(), Toast.LENGTH_LONG).show();
-                });
-            }
-            @Override public void onFailure(SdkException error) {
-                main.post(() -> {
-                    button.setEnabled(true);
-                    Toast.makeText(ChargeActivity.this,
-                        "Failed: " + error.getClass().getSimpleName(), Toast.LENGTH_LONG).show();
-                });
-            }
-        };
-        io.execute(() -> {
-            try { sdk.doTransaction(request, listener); }
-            catch (SdkException e) { /* main.post(...) */ }
+            @Override public void onSuccess(TransactionResult result) { /* finalise order */ }
+            @Override public void onFailure(SdkException error) { /* dispatch */ }
         });
     }
 }
 ```
 
-> Java callers MUST construct unsigned values via Kotlin helpers — see
-> `jvm/examples.md` for the full UInt/ULong workaround. The
-> pseudo-construction `kotlin.UInt.constructor-impl` shown above is
-> illustrative; in real code use a thin Kotlin helper file.
+> Java samples require the `Unsigned` helper (`com.merchant.pos.Unsigned`). See `integration.md` § "Java interop".
 
-## Next docs
+## Cloud `cancel` / `check_status`
 
-`android/errors`, `android/distribution`, `apis/do_transaction`.
+```kotlin
+val cancelOpts = CancelOptions.Cloud(CloudCancelOptions(
+    merchantId = "MID-12345",
+    securityToken = BuildConfig.CLOUD_TOKEN,
+    identity = CloudIdentity.Imei(storeId = "STORE-1", imei = "353000000000000"),
+    amount = "19900",                              // string, paise
+))
+sdk.cancel(plutusTxnRefId, cancelOpts)             // event_id == TransactionResult.transaction_id
+
+val statusOpts = CheckStatusOptions.Cloud(CloudCheckStatusOptions(
+    merchantId = "MID-12345",
+    securityToken = BuildConfig.CLOUD_TOKEN,
+    identity = CloudIdentity.Imei(storeId = "STORE-1", imei = "353000000000000"),
+))
+val status = sdk.checkStatus(plutusTxnRefId, statusOpts)
+```
+
+## PADController `restart`
+
+```kotlin
+val sdk = PineBillingSdk(
+    context, config, AndroidSystemBridge(context)   // platformBridge required for restart
+)
+withContext(Dispatchers.IO) { sdk.restart() }
+```

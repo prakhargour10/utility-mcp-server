@@ -4,7 +4,7 @@
 
 ## Purpose
 
-SDK-wide construction config. All fields optional; pass an empty SdkConfig for the most common case. Holds infrastructure config only — merchant identity belongs on TransactionRequest.
+SDK-wide construction config. Holds infrastructure config only — merchant identity belongs on `TransactionRequest`.
 
 ## Fields
 
@@ -13,18 +13,19 @@ SDK-wide construction config. All fields optional; pass an empty SdkConfig for t
 | `default_timeout_ms` | `u32?` | no | Range 1_000..600_000. Default 60_000. |
 | `log_level` | `LogLevel?` | no | Default Info. |
 | `transport` | `TransportType?` | no | Initial transport. Null = no transport selected. |
-| `app_to_app` | `AppToAppConfig?` | conditional | Required iff transport == AppToApp (or any later set_transport(AppToApp)). |
+| `app_to_app` | `AppToAppConfig?` | conditional | Required iff transport == AppToApp. |
 | `application_id` | `string?` | conditional | Pinelabs-provisioned. Required for AppToApp DoTxn (MethodId=1001). Forwarded as Header.ApplicationId. |
 | `cloud` | `CloudConfig?` | conditional | Required iff transport == Cloud. |
 | `pad_controller` | `PadControllerConfig?` | conditional | Honoured iff transport == PadController. |
 
 ## MUST
 
-- Validate ranges yourself before calling — the SDK will throw InvalidInput otherwise.
+- Validate ranges yourself before calling — the SDK throws `InvalidInput` otherwise.
+- For AppToApp, supply both `app_to_app` and `application_id`.
 
 ## MUST NOT
 
-- Do not put merchant_id, terminal_id, or credentials here.
+- Do not put `merchant_id`, `terminal_id`, or credentials here.
 
 ## Cross-references
 

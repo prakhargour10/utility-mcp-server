@@ -1,32 +1,39 @@
-# Model: `PlatformAppToAppBridge` (callback)
+# Model: `PlatformAppToAppBridge` (callback interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Platform bridge for the AppToApp transport. The MasterApp Messenger IPC is Android-only; Rust core does not link to Android APIs. Implementor (Android binding) implements both methods.
+Platform bridge for the AppToApp transport. The MasterApp Messenger IPC is Android-only; the Rust core must not link to any Android API. This callback interface is the boundary.
+
+> **On Android the merchant does NOT implement this directly.** The
+> `com.pinelabs.billing.sdk.PineBillingSdk` façade auto-builds a
+> `MasterAppTransport` from `SdkConfig.app_to_app` and
+> `SdkConfig.application_id`. On non-Android bindings (JVM, ios,
+> python, …) AppToApp is unavailable — those bindings have no
+> upstream Messenger IPC primitive.
 
 ## Methods
 
 | Name | Signature | Notes |
 |---|---|---|
-| `do_transaction` | `[Throws=SdkError] TransactionResult do_transaction(string event_id, TransactionRequest request)` | Bind / send / await reply / unbind synchronously. |
-| `test_print` | `[Throws=SdkError] void test_print(string event_id)` | Trigger a test print at the terminal connected to MasterApp. |
+| `do_transaction` | `do_transaction(string event_id, TransactionRequest request) -> TransactionResult` (throws `SdkError`) | Run a Sale / Refund / Void / Capture / PreAuth via the upstream Messenger transport. |
+| `test_print` | `test_print(string event_id)` (throws `SdkError`) | Trigger a test print at the terminal. |
 
-## MUST
+## Threading
 
-- Surface bind / IPC failures as TransportUnavailable (synchronous setup) or TransportError (mid-flight).
-- Surface reply timeout as Timeout.
-- Map MasterApp BaseResponse failures and DetailResponse.ResponseCode != 0 to TransactionFailed{code,message}.
+Methods are invoked from the SDK worker thread and are allowed to block — bind / send / await reply / unbind happen synchronously inside one call.
 
-## MUST NOT
+## Error mapping
 
-- Do not invent fields not present in the typed TransactionRequest — wire JSON is owned by this implementation.
-- Do not retain references to event_id beyond the call.
+- Bind / IPC setup failure → `SdkError.TransportUnavailable`.
+- Mid-flight IPC failure → `SdkError.TransportError`.
+- Reply timeout → `SdkError.Timeout`.
+- Upstream validation failure or non-zero `DetailResponse.ResponseCode` → `SdkError.TransactionFailed { detail, terminal_response_code }`.
 
 ## Cross-references
 
-`constructor`, `do_transaction`, `test_print`, `TransactionRequest`, `TransactionResult`, `SdkError`
+`apis/constructor`, `SdkError`, `TransactionResult`
 
 ## Per-language naming
 

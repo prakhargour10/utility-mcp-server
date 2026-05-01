@@ -4,26 +4,18 @@
 
 ## Purpose
 
-Outcome of run_self_test.
+Outcome of `run_self_test`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `passed` | `boolean` | yes |  |
+| `passed` | `boolean` | yes | |
 | `details` | `sequence<string>` | yes | Raw terminal-reported result lines. |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-_(no anti-patterns)_
 
 ## Cross-references
 
-`run_self_test`
+`apis/run_self_test`
 
 ## Per-language naming
 

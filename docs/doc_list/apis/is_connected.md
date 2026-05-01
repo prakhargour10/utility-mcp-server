@@ -1,27 +1,20 @@
 # API: `is_connected`
 
-> **AI INSTRUCTIONS:** This file describes the public method `is_connected` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `is_connected` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
 ```
-is_connected() -> boolean
+boolean is_connected()
 ```
 
 ## Purpose
 
-Whether the SDK currently holds an open link. Per-transport semantics vary.
-
-## Parameters
-
-_None._
-
+Whether the SDK currently holds an open link to a terminal. AppToApp returns true only mid-call. Cloud returns false (per-call HTTPS). PADController tracks the last probe.
 
 ## Returns
 
-boolean. AppToApp: true only mid-call. TCP/Cloud/PADController: true between successful connect and next disconnect/transport failure. No transport selected: false.
+`boolean`.
 
 ## Delivery model
 
@@ -29,53 +22,49 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-_None._
+- This method does NOT throw.
 
 ## MUST
 
-- Use as a UI hint, not a guarantee for the next call (state may change by the time you call do_transaction).
+- Treat the value as advisory — between the call and the next op the link can drop.
 
 ## MUST NOT
 
-_(no anti-patterns specific to this API)_
+- Do not gate `do_transaction` on `is_connected` for AppToApp / Cloud — they bind per call.
 
 ## Transport support matrix
 
-| Transport | Behaviour |
+| Transport | v1 behaviour |
 |---|---|
-| AppToApp | `true` only while a call is in flight (binds upstream PoS service per call). |
-| Tcp | `false` (v1 placeholder — no transport selected behaviour). |
-| Cloud | `false` between calls (HTTPS per-call). |
-| PadController | tracks the last `connect()` probe result. |
+| AppToApp | true mid-call only |
+| Tcp | `false` |
+| Cloud | `false` (per-call HTTPS) |
+| PadController | tracks last probe |
 
 ## Per-language call shapes
 
 ### Android (Kotlin) — shipping
 
 ```kotlin
-val ok: Boolean = sdk.isConnected()
+val connected: Boolean = sdk.isConnected()
 ```
 
 ### Android (Java) — shipping
 
 ```java
-boolean ok = sdk.isConnected();
+boolean connected = sdk.isConnected();
 ```
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
-val ok: Boolean = sdk.isConnected()
+val connected: Boolean = sdk.isConnected()
 ```
 
 ### JVM (Java) — shipping
 
 ```java
-boolean ok = sdk.isConnected();
+boolean connected = sdk.isConnected();
 ```
 
 ### Swift (iOS) — roadmap
@@ -83,7 +72,7 @@ boolean ok = sdk.isConnected();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-let ok: Bool = sdk.isConnected()
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -91,7 +80,7 @@ let ok: Bool = sdk.isConnected()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-ok = sdk.is_connected()
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -99,7 +88,7 @@ ok = sdk.is_connected()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-const ok = sdk.isConnected();
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -107,18 +96,15 @@ const ok = sdk.isConnected();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-bool ok = pine_billing_sdk_is_connected(sdk);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
-- Models: `TransportType`
+- Models: `SdkError`
 - Concepts: `lifecycle`, `transports`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

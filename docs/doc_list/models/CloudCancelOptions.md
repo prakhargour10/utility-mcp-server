@@ -4,28 +4,32 @@
 
 ## Purpose
 
-Cloud cancel extras.
+Cloud cancel extras. Required when the active transport is Cloud. **All four fields are mandatory.**
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `merchant_id` | `string` | yes |  |
-| `security_token` | `string` | yes | Never log. |
-| `identity` | `CloudIdentity` | yes |  |
-| `amount` | `string` | yes | Validated ^[0-9]+$. |
+| `merchant_id` | `string` | yes | |
+| `security_token` | `string` | yes | Per-call token; never log. |
+| `identity` | `CloudIdentity` | yes | |
+| `amount` | `string` | yes | Charge amount, validated `^[0-9]+$`. |
 
 ## MUST
 
-_(no positive obligations)_
+- Populate all four fields.
+- `amount` matches the original Cloud charge amount as paise digits.
+- Never log `security_token`.
+- Use the `PlutusTransactionReferenceID` as the `event_id` argument to `cancel` on Cloud — NOT the SDK-allocated UUID.
 
 ## MUST NOT
 
-- Do not log security_token.
+- Do not omit any field. All four are required.
+- Do not pass `CancelOptions::Cloud` on a non-Cloud active transport — raises `InvalidInput`.
 
 ## Cross-references
 
-`CancelOptions`, `CloudIdentity`
+`CancelOptions`, `CloudIdentity`, `apis/cancel`
 
 ## Per-language naming
 

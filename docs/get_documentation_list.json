@@ -1,5 +1,19 @@
 {
-  "schema_version": "1.1",
+  "schema_version": "1.2",
+  "schema_changes_from_1_1": [
+    "Added sdk.runtime_dependencies (per-binding mandatory libraries that the SDK does NOT bundle).",
+    "Added sdk.toolchain_requirements (AGP / Kotlin / JDK / Gradle floors per binding).",
+    "Added sdk.distribution_layout per artifact (wrapper-zip vs raw artifact, payload tree).",
+    "Added integration_blockers — top runtime/compile errors clients hit and the one-line fix per error.",
+    "Added oem_terminal_registry stub (real list ships in concepts/oem-terminal-registry.md).",
+    "Added android_facade.constructor_signature alongside the UDL canonical constructor.",
+    "Added rules_for_generated_code entries for JNA (@aar classifier), Gson, buildConfig=true, JDK 17, fail-fast applicationId.",
+    "Corrected android.min_sdk from 21 to 23 (modern AndroidX requires 23).",
+    "Corrected android.notes from 'JNA is NOT required' to 'JNA + Gson are mandatory at runtime'.",
+    "Corrected artifact_keys.android-aar to reflect the wrapper-ZIP layout actually returned by get_sdk.",
+    "Added concepts binding-aliases and oem-terminal-registry to concept_keys.",
+    "Reordered language_keys.android.aliases to put 'kotlin' explicitly first (most-requested form)."
+  ],
   "sdk": {
     "name": "Pine Billing SDK",
     "package_id": "pine-billing-sdk",
@@ -8,32 +22,16 @@
     "uniffi_namespace": "pine_billing",
     "public_class": "PineBillingSdk",
     "current_version": "0.5.0-preview.2",
+    "release_status": "pre-1.0 preview — breaking changes allowed in MINOR bumps",
     "last_updated_for_sdk_version": "0.5.0-preview.2",
+    "homepage": "https://github.com/PineLabs-Offline/Pine_Billing_SDK",
     "supported_bindings": [
-      {
-        "key": "android",
-        "status": "shipping"
-      },
-      {
-        "key": "jvm",
-        "status": "shipping"
-      },
-      {
-        "key": "ios",
-        "status": "roadmap"
-      },
-      {
-        "key": "python",
-        "status": "roadmap"
-      },
-      {
-        "key": "nodejs",
-        "status": "roadmap"
-      },
-      {
-        "key": "c",
-        "status": "roadmap"
-      }
+      { "key": "android", "status": "shipping",  "since": "0.5.0-preview.2" },
+      { "key": "jvm",     "status": "shipping",  "since": "0.5.0-preview.2" },
+      { "key": "ios",     "status": "roadmap",   "since": null },
+      { "key": "python",  "status": "roadmap",   "since": null },
+      { "key": "nodejs",  "status": "roadmap",   "since": null },
+      { "key": "c",       "status": "roadmap",   "since": null }
     ],
     "supported_languages": [
       "Kotlin (Android)",
@@ -77,16 +75,25 @@
       "cpp": "c",
       "cxx": "c"
     },
+    "language_alias_rationale": {
+      "kotlin": "Most 'kotlin' requests originate from Android merchant apps. Backend Kotlin developers must use 'kotlin-jvm' or 'jvm' explicitly. See concepts/binding-aliases.md.",
+      "java": "Bare 'java' resolves to JVM because Android Java callers usually identify themselves as 'java-android' or 'kotlin'. If unsure, ASK the user for the runtime."
+    },
     "supported_transports": [
       "AppToApp",
-      "Tcp",
-      "Bluetooth",
-      "Usb",
-      "Serial",
-      "Cloud"
+      "Cloud",
+      "PadController",
+      "Tcp"
     ],
+    "transport_status": {
+      "AppToApp":     { "status": "shipping",    "default_for": ["android"], "notes": "Android-only. Binds to upstream Pinelabs PoS app via Messenger IPC. Requires <queries> + APPLICATION_ID." },
+      "Cloud":        { "status": "shipping",    "default_for": ["jvm"],     "notes": "REST over HTTPS. Available on every binding with HTTP. CloudConfig.base_url required." },
+      "PadController":{ "status": "shipping-v1", "default_for": [],          "notes": "TCP-loopback (default 127.0.0.1:8082). v1 supports do_transaction + connect family + restart only; everything else NotSupported." },
+      "Tcp":          { "status": "placeholder", "default_for": [],          "notes": "Reserved enum value. NotSupported across the board in 0.5.0-preview.2." }
+    },
     "default_currency": "INR",
     "amount_unit": "paise (lowest currency unit, integer)",
+    "amount_unit_caveat": "request.amount is u64 paise (authoritative). result.amount is a free-form string echoed by the terminal/upstream and SHOULD NOT be used for reconciliation. See models/TransactionResult.md.",
     "event_id_format": "UUIDv4 (SDK-allocated; merchants never create one)",
     "language_doc_files": [
       "requirements",
@@ -95,7 +102,125 @@
       "examples",
       "errors",
       "distribution"
-    ]
+    ],
+    "android_facade": {
+      "constructor_signature": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)",
+      "differs_from_udl": true,
+      "differences": [
+        "Takes an Android Context as the first argument (not present in UDL).",
+        "Auto-builds the AppToApp PlatformAppToAppBridge from config.appToApp + config.applicationId — merchant does NOT pass it.",
+        "Throws IllegalStateException if a blocking method is invoked on the Android main thread."
+      ]
+    },
+    "runtime_dependencies": {
+      "android": [
+        {
+          "id": "net.java.dev.jna:jna",
+          "version_floor": "5.14.0",
+          "classifier": "@aar",
+          "scope": "implementation",
+          "mandatory": true,
+          "reason": "UniFFI-generated bindings reference com.sun.jna.Structure. Without it the app crashes at PineBillingSdk construction with NoClassDefFoundError: com/sun/jna/Structure. The @aar classifier is mandatory because the plain JAR ships only desktop-OS natives; the AAR variant packages libjnidispatch.so for arm64-v8a / armeabi-v7a / x86_64.",
+          "if_missing_symptom": "java.lang.NoClassDefFoundError: Failed resolution of: Lcom/sun/jna/Structure; at com.pinelabs.billing.sdk.PineBillingSdk.<init>(PineBillingSdk.kt:74)",
+          "future_fix": "Declare in the AAR's POM/.module metadata so it is transitive."
+        },
+        {
+          "id": "com.google.code.gson:gson",
+          "version_floor": "2.10.0",
+          "version_pinned_in_sdk": "2.11.0",
+          "scope": "implementation",
+          "mandatory": true,
+          "applies_when": "Always — buildBridgeIfNeeded constructs MasterAppTransport unconditionally.",
+          "reason": "MasterAppTransport.defaultGson() (line 260) calls new GsonBuilder(). Gson is not bundled in the AAR.",
+          "if_missing_symptom": "java.lang.NoClassDefFoundError: Failed resolution of: Lcom/google/gson/GsonBuilder; at com.pinelabs.billing.sdk.MasterAppTransport$Companion.defaultGson(MasterAppTransport.kt:260)",
+          "future_fix": "Declare in the AAR's POM/.module metadata so it is transitive, or shade Gson into the AAR."
+        },
+        {
+          "id": "org.jetbrains.kotlin:kotlin-stdlib",
+          "version_floor": "1.9.22",
+          "scope": "implementation",
+          "mandatory": true,
+          "applies_when": "Pulled transitively by AGP/Compose; pure-Java callers must add it explicitly.",
+          "reason": "UniFFI emits Kotlin types (UInt, ULong, sealed classes). Even Java consumers need kotlin-stdlib at runtime.",
+          "if_missing_symptom": "java.lang.ClassNotFoundException: kotlin.UInt"
+        }
+      ],
+      "jvm": [
+        {
+          "id": "net.java.dev.jna:jna",
+          "version_floor": "5.14.0",
+          "scope": "runtime",
+          "mandatory": true,
+          "reason": "UniFFI-generated bindings reference com.sun.jna.Structure.",
+          "if_missing_symptom": "java.lang.UnsatisfiedLinkError: Unable to load library 'uniffi_pine_billing'"
+        },
+        {
+          "id": "org.jetbrains.kotlin:kotlin-stdlib",
+          "version_floor": "1.9.22",
+          "scope": "runtime",
+          "mandatory": true,
+          "reason": "UniFFI emits Kotlin types.",
+          "if_missing_symptom": "java.lang.ClassNotFoundException: kotlin.UInt"
+        }
+      ],
+      "ios": "TODO — roadmap binding",
+      "python": "TODO — roadmap binding",
+      "nodejs": "TODO — roadmap binding",
+      "c": "TODO — roadmap binding"
+    },
+    "toolchain_requirements": {
+      "android": {
+        "agp": ">= 8.0.0 (recommended 9.0.1+)",
+        "kotlin": ">= 1.9.22 (recommended 2.0+)",
+        "jdk": "17 (Vanilla Android Studio templates default to 11 — must be bumped explicitly)",
+        "gradle": ">= 8.4",
+        "compile_sdk": 36,
+        "target_sdk": 35,
+        "min_sdk": 23,
+        "min_sdk_caveat": "minSdk 21 only works if AndroidX libraries are pinned to versions released before 1.13.0 — not recommended.",
+        "build_features_required": ["buildConfig = true (for buildConfigField)"],
+        "kotlin_dsl_notes": "kotlinOptions { jvmTarget = '17' } block was REMOVED in AGP 9 / Kotlin 2.x. Use kotlin { compilerOptions.jvmTarget = JvmTarget.JVM_17 } or rely on android.compileOptions alone."
+      },
+      "jvm": {
+        "jdk": "17 (minimum)",
+        "kotlin": ">= 1.9.22 (if Kotlin caller)",
+        "gradle_or_maven": "any modern build tool",
+        "launch": "java -cp only — there is no Main-Class manifest in the JAR",
+        "supported_os": ["Linux x86_64", "Linux aarch64", "macOS x86_64", "macOS arm64", "Windows x86_64"]
+      }
+    },
+    "abi_matrix": {
+      "android": {
+        "shipped": ["arm64-v8a", "armeabi-v7a"],
+        "not_shipped": ["x86_64", "x86"],
+        "x86_64_consequence": "Stock Android Studio emulators (x86_64 hosts) FAIL with UnsatisfiedLinkError: libuniffi_pine_billing. Test on physical device or arm64 emulator (Apple Silicon hosts only)."
+      },
+      "jvm": {
+        "shipped": ["linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-arm64", "windows-x86_64"],
+        "loader": "JNA extracts native libs from the JAR's META-INF/jniLibs/<triple>/ at runtime"
+      }
+    },
+    "distribution_layout": {
+      "android-aar": {
+        "container_format": "wrapper-zip",
+        "filename": "android-kotlin-0.5.0-preview.2.zip",
+        "tree": [
+          "payload/pine-billing-sdk-0.5.0-preview.2.aar",
+          "README.md",
+          "CHANGELOG.md",
+          "LICENSE.txt",
+          "METADATA.json",
+          "THIRD_PARTY_NOTICES.md"
+        ],
+        "install_hint": "unzip the container; copy payload/pine-billing-sdk-<ver>.aar into your app/libs/; declare with implementation(files(\"libs/pine-billing-sdk-<ver>.aar\")).",
+        "mcp_team_action": "The MCP get_sdk(artifact_key='android-aar') currently returns the wrapper zip but the registry's filename field implies the bare .aar. Either return the .aar directly OR rename the filename field to reflect the .zip. Pick one for the next preview."
+      },
+      "jvm-jar": {
+        "container_format": "raw-jar",
+        "filename": "pine-billing-sdk-0.5.0-preview.2.jar",
+        "install_hint": "drop on classpath; launch with java -cp (no Main-Class manifest)."
+      }
+    }
   },
   "mcp_setup": {
     "description": "Variables the client LLM SHOULD set on its session before generating SDK code or instructing the user.",
@@ -103,42 +228,50 @@
       "DOCS_ROOT": "absolute path to this doc bundle on disk",
       "TARGET_LANGUAGE": "user-stated language. MUST be resolved to a binding via sdk.language_aliases. Note the JVM/Android split: 'java' alone defaults to 'jvm'; 'java-android' or 'kotlin' resolve to 'android'.",
       "TARGET_BINDING": "resolved binding key: one of android | jvm | ios | python | nodejs | c.",
-      "TARGET_TRANSPORT": "one of AppToApp | Cloud | PadController | Tcp \u2014 ask the user; AppToApp is default on Android, Cloud is default for server-side merchants",
-      "SDK_VERSION": "exact version requested by the user; default to sdk.current_version (0.5.0-preview.2)",
-      "MERCHANT_ID": "supplied by Pinelabs onboarding; required on Cloud + on TransactionRequest for non-AppToApp transports",
-      "TERMINAL_ID": "supplied by Pinelabs onboarding; required on TransactionRequest for non-AppToApp transports",
-      "APPLICATION_ID": "Pinelabs-provisioned app identifier; required for AppToApp",
-      "CLOUD_BASE_URL": "https://\u2026 (host only, no path) \u2014 required when TARGET_TRANSPORT == Cloud",
-      "CLOUD_SECURITY_TOKEN": "per-call secret; never log, never embed in source",
-      "ENABLE_DEBUG_LOGS": "true|false; maps to LogLevel"
+      "TARGET_TRANSPORT": "one of AppToApp | Cloud | PadController | Tcp — ASK the user; AppToApp is default on Android, Cloud is default for server-side merchants, PadController for on-prem desktop kiosks.",
+      "SDK_VERSION": "exact version requested by the user; default to sdk.current_version (0.5.0-preview.2).",
+      "MERCHANT_ID": "supplied by Pinelabs onboarding; required on Cloud + on TransactionRequest for non-AppToApp transports.",
+      "TERMINAL_ID": "supplied by Pinelabs onboarding; required on TransactionRequest for non-AppToApp transports.",
+      "APPLICATION_ID": "Pinelabs-provisioned app identifier; required for AppToApp. Sandbox/test value: '1001' (verify against Pinelabs onboarding).",
+      "CLOUD_BASE_URL": "https://… (host only, no path) — required when TARGET_TRANSPORT == Cloud.",
+      "CLOUD_SECURITY_TOKEN": "per-call secret; never log, never embed in source.",
+      "ENABLE_DEBUG_LOGS": "true|false; maps to LogLevel."
     },
     "workflow": [
       "1. Always call get_documentation_list FIRST and cache the response for the session.",
-      "2. Resolve TARGET_LANGUAGE \u2192 TARGET_BINDING via sdk.language_aliases. If the binding's status is 'roadmap', tell the user it is NOT shipping in this release before emitting any code.",
-      "3. Fetch the six per-binding files: get_documentation(category='language', key=`${TARGET_BINDING}/requirements`), then setup, integration, examples, errors, distribution.",
-      "4. Fetch concepts you need:  get_documentation(category='concept', key='lifecycle' | 'transports' | 'capabilities' | 'error-handling' | 'threading' | 'distribution' | \u2026).",
+      "2. Resolve TARGET_LANGUAGE → TARGET_BINDING via sdk.language_aliases. If the binding's status is 'roadmap', tell the user it is NOT shipping in this release before emitting any code. Recommend android or jvm instead.",
+      "3. Fetch the six per-binding files: get_documentation(category='language', key=`${TARGET_BINDING}/requirements`), then setup, integration, examples, errors, distribution. Read all six BEFORE generating code.",
+      "4. Fetch concepts you need: get_documentation(category='concept', key='lifecycle' | 'transports' | 'capabilities' | 'error-handling' | 'threading' | 'distribution' | 'binding-aliases' | 'oem-terminal-registry' | …).",
       "5. For every UDL symbol you intend to emit in code, fetch its model or api doc by key BEFORE writing the code. Do not hallucinate fields.",
-      "6. Use get_sdk(artifact_key=\u2026) to give the user a real download URL/coordinate; never invent one. Today only android-aar and jvm-jar have shipping artifacts.",
-      "7. Re-fetch on every new conversation \u2014 docs evolve with SDK_VERSION."
+      "6. Use get_sdk(artifact_key=…) to give the user a real download URL/coordinate; never invent one. Today only android-aar and jvm-jar have shipping artifacts. Note android-aar is delivered as a wrapper ZIP; see sdk.distribution_layout.android-aar.",
+      "7. Re-fetch on every new conversation — docs evolve with SDK_VERSION."
     ],
     "rules_for_generated_code": [
       "Amounts are u64 paise; reject negatives, reject > 99_999_999.",
       "currency MUST be 3 ASCII uppercase letters or null (defaults to INR).",
-      "event_id is allocated by the SDK \u2014 never construct a UUID and pass it in.",
-      "original_event_id is required iff transaction_type \u2208 {Refund, Void, Capture}, rejected otherwise.",
-      "transport_options variant MUST match the active transport; mismatch raises InvalidInput.",
+      "event_id is allocated by the SDK — never construct a UUID and pass it in.",
+      "original_event_id is required iff transaction_type ∈ {Refund, Void, Capture}, rejected otherwise.",
+      "transport_options variant MUST match the active transport; mismatch raises InvalidInput synchronously.",
       "On Cloud, transport_options is REQUIRED on do_transaction; cancel/check_status options are REQUIRED.",
-      "Listener callbacks fire on an SDK-internal thread. Generated UI code MUST marshal to the platform UI thread before touching widgets.",
-      "On Android, every blocking PineBillingSdk method throws IllegalStateException if invoked on the main thread \u2014 dispatch from a background executor or coroutine.",
+      "Listener callbacks fire on an SDK-internal worker thread. Generated UI code MUST marshal to the platform UI thread before touching widgets.",
+      "On Android, every blocking PineBillingSdk method throws IllegalStateException if invoked on the main thread — dispatch from a background executor or coroutine.",
       "Never log card data, PIN, CVV, full PAN, tokens, or keys. masked_pan only at debug.",
-      "Only one operation per SDK instance at a time \u2014 disable the trigger control on on_started, re-enable on on_success / on_failure."
+      "Only one operation per SDK instance at a time — disable the trigger control on on_started, re-enable on on_success / on_failure.",
+      "Java callers MUST use the inline com.merchant.pos.Unsigned helper for UInt / ULong fields (kotlin.UInt cannot be constructed from Java directly). The helper definition is in languages/jvm/setup.md § 5.",
+      "Android: declare implementation('net.java.dev.jna:jna:5.14.0@aar') AND implementation('com.google.code.gson:gson:2.11.0') in app/build.gradle.kts. The @aar classifier is mandatory.",
+      "Android: enable buildFeatures { buildConfig = true } when using buildConfigField (AGP 8+ default is false).",
+      "Android: use compileSdk=36, targetSdk=35, minSdk=23, JDK 17. Vanilla AS templates default to JDK 11 — bump explicitly.",
+      "Android: PINELABS_APP_ID MUST fail-fast at configure time (project.findProperty(...) ?: error('PINELABS_APP_ID not set')) — silent empty strings cause a runtime upstream rejection on the first do_transaction.",
+      "Android: include the <queries> entry for the upstream Pinelabs PoS package (default com.pinelabs.masterapp; OEM-specific — see concepts/oem-terminal-registry.md) and verify with the merchant's terminal vendor before shipping.",
+      "Android: do NOT manually copy ProGuard -keep rules — the AAR ships consumer-rules.pro that auto-applies them.",
+      "Android: combine packagingOptions { jniLibs.pickFirsts += '**/libc++_shared.so' } when consuming any other AAR that bundles the C++ runtime (Compose UI does, indirectly, on some toolchains)."
     ]
   },
   "tools": {
     "get_documentation_list": {
       "purpose": "Master index. Call once per session. Returns this payload.",
       "args": {},
-      "returns": "This JSON (cached as DOCS_ROOT/index.md is its on-disk equivalent)."
+      "returns": "This JSON. The on-disk equivalent is DOCS_ROOT/get_documentation_list.json."
     },
     "get_documentation": {
       "purpose": "Fetch a single detailed doc file.",
@@ -148,26 +281,12 @@
       },
       "returns": "Markdown body of DOCS_ROOT/<category>s/<key>.md.",
       "examples": [
-        {
-          "category": "api",
-          "key": "do_transaction"
-        },
-        {
-          "category": "model",
-          "key": "TransactionRequest"
-        },
-        {
-          "category": "language",
-          "key": "android/setup"
-        },
-        {
-          "category": "language",
-          "key": "jvm/examples"
-        },
-        {
-          "category": "concept",
-          "key": "lifecycle"
-        }
+        { "category": "api",      "key": "do_transaction" },
+        { "category": "model",    "key": "TransactionRequest" },
+        { "category": "language", "key": "android/setup" },
+        { "category": "language", "key": "jvm/examples" },
+        { "category": "concept",  "key": "lifecycle" },
+        { "category": "concept",  "key": "oem-terminal-registry" }
       ]
     },
     "get_sdk": {
@@ -176,173 +295,122 @@
         "artifact_key": "value from artifact_keys below",
         "version": "optional; defaults to sdk.current_version (0.5.0-preview.2)"
       },
-      "returns": "{ url, sha256, size_bytes, license, install_hint }"
+      "returns": "{ url, sha256, size_bytes, license, install_hint, container_format, filename }",
+      "notes": "android-aar returns a wrapper-zip; see sdk.distribution_layout.android-aar.tree before instructing the user to install."
     }
   },
   "key_registries": {
     "api_keys": [
       {
         "key": "constructor",
-        "signature": "PineBillingSdk(SdkConfig, PlatformAppToAppBridge?, PlatformBridge?)",
-        "throws": [
-          "InvalidInput",
-          "TransportUnavailable"
-        ]
+        "udl_signature": "PineBillingSdk(SdkConfig config, PlatformAppToAppBridge? app_to_app_bridge, PlatformBridge? platform_bridge)",
+        "android_facade_signature": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)",
+        "throws": ["InvalidInput", "TransportUnavailable"],
+        "doc": "apis/constructor.md"
       },
       {
         "key": "do_transaction",
         "signature": "do_transaction(TransactionRequest, TransactionListener)",
-        "throws": [
-          "InvalidInput",
-          "OperationInProgress",
-          "NotConnected",
-          "TransportUnavailable",
-          "NotSupported"
-        ],
-        "delivery": "async via TransactionListener"
+        "throws": ["InvalidInput", "OperationInProgress", "NotConnected", "TransportUnavailable", "NotSupported"],
+        "async_failure_variants": ["TransactionFailed", "TransportError", "Timeout", "Network", "ConnectionTimeout", "ReadTimeout", "NonSuccessHttp", "Cancelled", "Internal"],
+        "delivery": "async via TransactionListener",
+        "doc": "apis/do_transaction.md"
       },
       {
         "key": "cancel",
         "signature": "cancel(string event_id, CancelOptions?)",
-        "throws": [
-          "InvalidInput",
-          "NotSupported",
-          "TransportError",
-          "Timeout",
-          "Network",
-          "ConnectionTimeout",
-          "ReadTimeout",
-          "NonSuccessHttp"
-        ]
+        "throws": ["InvalidInput", "NotSupported", "TransportError", "Timeout", "Network", "ConnectionTimeout", "ReadTimeout", "NonSuccessHttp"],
+        "doc": "apis/cancel.md"
       },
       {
         "key": "check_status",
         "signature": "check_status(string event_id, CheckStatusOptions?) -> OperationStatus",
-        "throws": [
-          "InvalidInput",
-          "NotSupported",
-          "Network",
-          "Timeout",
-          "ConnectionTimeout",
-          "ReadTimeout",
-          "NonSuccessHttp"
-        ]
+        "throws": ["InvalidInput", "NotSupported", "Network", "Timeout", "ConnectionTimeout", "ReadTimeout", "NonSuccessHttp"],
+        "doc": "apis/check_status.md"
       },
       {
         "key": "connect",
         "signature": "connect(Terminal)",
-        "throws": [
-          "InvalidInput",
-          "NotSupported",
-          "TransportUnavailable"
-        ]
+        "throws": ["InvalidInput", "NotSupported", "TransportUnavailable"],
+        "doc": "apis/connect.md"
       },
       {
         "key": "disconnect",
         "signature": "disconnect()",
-        "throws": [
-          "TransportError"
-        ]
+        "throws": ["TransportError"],
+        "doc": "apis/disconnect.md"
       },
       {
         "key": "is_connected",
         "signature": "is_connected() -> boolean",
-        "throws": []
+        "throws": [],
+        "doc": "apis/is_connected.md"
       },
       {
         "key": "discover_terminals",
         "signature": "discover_terminals(DiscoveryListener)",
-        "throws": [
-          "NotSupported"
-        ],
-        "delivery": "async via DiscoveryListener"
+        "throws": ["NotSupported"],
+        "delivery": "async via DiscoveryListener",
+        "doc": "apis/discover_terminals.md"
       },
       {
         "key": "ping",
         "signature": "ping()",
-        "throws": [
-          "NotSupported",
-          "NotConnected",
-          "Timeout",
-          "TransportError"
-        ]
+        "throws": ["NotSupported", "NotConnected", "Timeout", "TransportError"],
+        "doc": "apis/ping.md"
       },
       {
         "key": "run_self_test",
         "signature": "run_self_test() -> SelfTestResult",
-        "throws": [
-          "NotSupported",
-          "NotConnected",
-          "Timeout",
-          "TransportError"
-        ]
+        "throws": ["NotSupported", "NotConnected", "Timeout", "TransportError"],
+        "doc": "apis/run_self_test.md"
       },
       {
         "key": "get_logs",
         "signature": "get_logs() -> TerminalLogs",
-        "throws": [
-          "NotSupported",
-          "NotConnected",
-          "Timeout",
-          "TransportError"
-        ]
+        "throws": ["NotSupported", "NotConnected", "Timeout", "TransportError"],
+        "doc": "apis/get_logs.md"
       },
       {
         "key": "get_terminal_info",
         "signature": "get_terminal_info() -> TerminalInfo",
-        "throws": [
-          "NotSupported",
-          "NotConnected",
-          "Timeout",
-          "TransportError"
-        ]
+        "throws": ["NotSupported", "NotConnected", "Timeout", "TransportError"],
+        "doc": "apis/get_terminal_info.md"
       },
       {
         "key": "test_print",
         "signature": "test_print(TestPrintListener)",
-        "throws": [
-          "NotSupported",
-          "NotConnected",
-          "OperationInProgress",
-          "TransportUnavailable"
-        ],
-        "delivery": "async via TestPrintListener"
+        "throws": ["NotSupported", "NotConnected", "OperationInProgress", "TransportUnavailable"],
+        "delivery": "async via TestPrintListener",
+        "doc": "apis/test_print.md"
       },
       {
         "key": "set_transport",
         "signature": "set_transport(TransportType)",
-        "throws": [
-          "InvalidInput"
-        ]
+        "throws": ["InvalidInput"],
+        "doc": "apis/set_transport.md"
       },
       {
         "key": "restart",
         "signature": "restart()",
-        "throws": [
-          "NotSupported",
-          "OperationInProgress",
-          "TransportUnavailable",
-          "TransportError"
-        ]
+        "throws": ["NotSupported", "OperationInProgress", "TransportUnavailable", "TransportError"],
+        "doc": "apis/restart.md"
       },
       {
         "key": "upload_imei_list",
         "signature": "upload_imei_list(CloudUploadImeiListOptions) -> UploadImeiListResult",
-        "throws": [
-          "NotSupported",
-          "InvalidInput",
-          "Network",
-          "Timeout",
-          "ConnectionTimeout",
-          "ReadTimeout",
-          "NonSuccessHttp"
-        ]
+        "throws": ["NotSupported", "InvalidInput", "Network", "Timeout", "ConnectionTimeout", "ReadTimeout", "NonSuccessHttp"],
+        "doc": "apis/upload_imei_list.md"
       }
     ],
+    "transport_capability_matrix": {
+      "AppToApp":      { "do_transaction": "supported", "cancel": "NotSupported", "check_status": "NotSupported", "connect": "NotSupported", "discover_terminals": "NotSupported", "ping": "NotSupported", "run_self_test": "NotSupported", "get_logs": "NotSupported", "get_terminal_info": "NotSupported", "test_print": "supported", "restart": "NotSupported", "upload_imei_list": "NotSupported" },
+      "Cloud":         { "do_transaction": "supported", "cancel": "supported",    "check_status": "supported",    "connect": "NotSupported", "discover_terminals": "NotSupported", "ping": "NotSupported", "run_self_test": "NotSupported", "get_logs": "NotSupported", "get_terminal_info": "NotSupported", "test_print": "NotSupported", "restart": "NotSupported", "upload_imei_list": "supported" },
+      "PadController": { "do_transaction": "supported", "cancel": "NotSupported", "check_status": "NotSupported", "connect": "supported",    "discover_terminals": "NotSupported", "ping": "NotSupported", "run_self_test": "NotSupported", "get_logs": "NotSupported", "get_terminal_info": "NotSupported", "test_print": "NotSupported", "restart": "supported",    "upload_imei_list": "NotSupported" },
+      "Tcp":           { "do_transaction": "NotSupported", "cancel": "NotSupported", "check_status": "NotSupported", "connect": "NotSupported", "discover_terminals": "NotSupported", "ping": "NotSupported", "run_self_test": "NotSupported", "get_logs": "NotSupported", "get_terminal_info": "NotSupported", "test_print": "NotSupported", "restart": "NotSupported", "upload_imei_list": "NotSupported" }
+    },
     "model_keys": {
-      "errors": [
-        "SdkError"
-      ],
+      "errors": ["SdkError"],
       "enums": [
         "TransactionType",
         "TransactionStatus",
@@ -395,24 +463,21 @@
         "key": "android",
         "status": "shipping",
         "binding": "Kotlin (primary) + Java interop, packaged as AAR",
-        "languages": [
-          "Kotlin",
-          "Java"
-        ],
-        "aliases": [
-          "kotlin",
-          "kotlin-android",
-          "java-android",
-          "android"
-        ],
+        "languages": ["Kotlin", "Java"],
+        "aliases": ["kotlin", "kotlin-android", "java-android", "android"],
         "package_manager": "Direct file drop (Gradle local file)",
-        "artifact": "pine-billing-sdk-<ver>.aar",
-        "abis": [
-          "arm64-v8a",
-          "armeabi-v7a"
-        ],
-        "min_sdk": 21,
-        "namespace": "com.pinelabs.billing.sdk (fa\u00e7ade) + uniffi.pine_billing (UDL-projected models)",
+        "artifact": "pine-billing-sdk-<ver>.aar (delivered inside android-kotlin-<ver>.zip wrapper)",
+        "abis": ["arm64-v8a", "armeabi-v7a"],
+        "abi_caveat": "x86_64 NOT shipped — emulators on Intel hosts will fail with UnsatisfiedLinkError.",
+        "min_sdk": 23,
+        "compile_sdk": 36,
+        "target_sdk": 35,
+        "jdk": 17,
+        "agp": ">= 8.0 (recommended 9.0.1+)",
+        "kotlin": ">= 1.9.22 (recommended 2.0+)",
+        "namespace": "com.pinelabs.billing.sdk (façade) + uniffi.pine_billing (UDL-projected models)",
+        "facade_constructor": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)",
+        "udl_constructor_difference": "Android façade auto-builds the AppToApp bridge from config.appToApp + config.applicationId; merchants do NOT pass a PlatformAppToAppBridge.",
         "doc_files": [
           "android/requirements",
           "android/setup",
@@ -421,25 +486,32 @@
           "android/errors",
           "android/distribution"
         ],
-        "notes": "JNA is NOT required \u2014 the AAR loads its native lib via System.loadLibrary directly."
+        "mandatory_runtime_deps": [
+          "net.java.dev.jna:jna:5.14.0@aar",
+          "com.google.code.gson:gson:2.11.0"
+        ],
+        "must_use_blocks": [
+          "android.buildFeatures.buildConfig = true (for buildConfigField)",
+          "android.compileOptions { sourceCompatibility = VERSION_17; targetCompatibility = VERSION_17 }",
+          "packagingOptions.jniLibs.pickFirsts += '**/libc++_shared.so' (when combining with any other AAR that bundles the C++ runtime)"
+        ],
+        "must_not_use_blocks": [
+          "kotlinOptions { jvmTarget = '17' } — REMOVED in AGP 9 / Kotlin 2.x; use kotlin { compilerOptions.jvmTarget = JvmTarget.JVM_17 } if the kotlin DSL is needed."
+        ],
+        "default_transport": "AppToApp",
+        "main_thread_guard": true,
+        "notes": "Both JNA and Gson are MANDATORY at runtime — the AAR does NOT bundle either. The 'JNA NOT required' claim from earlier docs is incorrect. See concepts/versioning-and-support.md for the runtime-deps row."
       },
       {
         "key": "jvm",
         "status": "shipping",
-        "binding": "Kotlin / Java on a desktop or server JVM, packaged as a fat JAR",
-        "languages": [
-          "Kotlin",
-          "Java"
-        ],
-        "aliases": [
-          "jvm",
-          "kotlin-jvm",
-          "java-jvm",
-          "java"
-        ],
+        "binding": "Kotlin / Java on a desktop or server JVM, packaged as a JAR with bundled native libs",
+        "languages": ["Kotlin", "Java"],
+        "aliases": ["jvm", "kotlin-jvm", "java-jvm", "java"],
         "package_manager": "Direct file drop (Maven/Gradle local file)",
         "artifact": "pine-billing-sdk-<ver>.jar",
         "namespace": "uniffi.pine_billing",
+        "facade_constructor": "(no façade — call the UDL-canonical PineBillingSdk(SdkConfig, PlatformAppToAppBridge?, PlatformBridge?) directly)",
         "doc_files": [
           "jvm/requirements",
           "jvm/setup",
@@ -448,24 +520,22 @@
           "jvm/errors",
           "jvm/distribution"
         ],
-        "notes": "JNA 5.14+ IS required at runtime. JAR is launched via `java -cp` only; there is no Main-Class manifest. Java callers must use a Kotlin helper for UInt/ULong fields."
+        "mandatory_runtime_deps": [
+          "net.java.dev.jna:jna:5.14.0",
+          "org.jetbrains.kotlin:kotlin-stdlib:1.9.22+"
+        ],
+        "default_transport": null,
+        "main_thread_guard": false,
+        "available_transports": ["Cloud", "PadController"],
+        "unavailable_transports": ["AppToApp"],
+        "notes": "JNA 5.14+ is required at runtime. JAR is launched via `java -cp` only; there is no Main-Class manifest. Java callers must use the com.merchant.pos.Unsigned helper for UInt/ULong fields (definition in jvm/setup.md § 5). AppToApp is unavailable on JVM — there is no upstream Pinelabs PoS Messenger IPC surface on a generic JVM."
       },
       {
         "key": "ios",
         "status": "roadmap",
         "binding": "Swift",
-        "languages": [
-          "Swift",
-          "Objective-C"
-        ],
-        "aliases": [
-          "swift",
-          "objective-c",
-          "objc",
-          "obj-c",
-          "ios",
-          "macos"
-        ],
+        "languages": ["Swift", "Objective-C"],
+        "aliases": ["swift", "objective-c", "objc", "obj-c", "ios", "macos"],
         "package_manager": "SwiftPM, CocoaPods (planned)",
         "artifact": "PineBillingSdk.xcframework (planned)",
         "module": "PineBillingSdk",
@@ -476,19 +546,15 @@
           "ios/examples",
           "ios/errors",
           "ios/distribution"
-        ]
+        ],
+        "notes": "Roadmap binding. Refuse to emit production iOS code in 0.5.0-preview.2 and recommend the user wait for the iOS preview or use a JVM-based backend bridge."
       },
       {
         "key": "python",
         "status": "roadmap",
         "binding": "Python",
-        "languages": [
-          "Python"
-        ],
-        "aliases": [
-          "python",
-          "py"
-        ],
+        "languages": ["Python"],
+        "aliases": ["python", "py"],
         "package_manager": "pip (planned)",
         "artifact": "pine_billing_sdk-<ver>-*.whl (planned)",
         "module": "pine_billing",
@@ -499,25 +565,15 @@
           "python/examples",
           "python/errors",
           "python/distribution"
-        ]
+        ],
+        "notes": "Roadmap binding. Refuse to emit production Python code in 0.5.0-preview.2."
       },
       {
         "key": "nodejs",
         "status": "roadmap",
         "binding": "Node.js (N-API)",
-        "languages": [
-          "TypeScript",
-          "JavaScript"
-        ],
-        "aliases": [
-          "nodejs",
-          "node",
-          "node.js",
-          "javascript",
-          "js",
-          "typescript",
-          "ts"
-        ],
+        "languages": ["TypeScript", "JavaScript"],
+        "aliases": ["nodejs", "node", "node.js", "javascript", "js", "typescript", "ts"],
         "package_manager": "npm (planned)",
         "artifact": "@pinelabs/pine-billing-sdk (planned)",
         "module": "@pinelabs/pine-billing-sdk",
@@ -528,22 +584,15 @@
           "nodejs/examples",
           "nodejs/errors",
           "nodejs/distribution"
-        ]
+        ],
+        "notes": "Roadmap binding. Refuse to emit production Node.js code in 0.5.0-preview.2."
       },
       {
         "key": "c",
         "status": "roadmap",
         "binding": "C ABI (UniFFI scaffolding)",
-        "languages": [
-          "C",
-          "C++"
-        ],
-        "aliases": [
-          "c",
-          "c++",
-          "cpp",
-          "cxx"
-        ],
+        "languages": ["C", "C++"],
+        "aliases": ["c", "c++", "cpp", "cxx"],
         "package_manager": "tar/zip (planned)",
         "artifact": "pine_billing_sdk-<ver>-<triple>.tgz (planned)",
         "header": "pine_billing.h",
@@ -554,7 +603,8 @@
           "c/examples",
           "c/errors",
           "c/distribution"
-        ]
+        ],
+        "notes": "Roadmap binding. The C ABI is what every other binding wraps; useful for embedded/native consumers. Refuse to emit production C/C++ code in 0.5.0-preview.2."
       }
     ],
     "concept_keys": [
@@ -567,94 +617,54 @@
       "eventid-and-reconciliation",
       "versioning-and-support",
       "distribution",
-      "threading"
+      "threading",
+      "binding-aliases",
+      "oem-terminal-registry"
     ],
     "artifact_keys": [
       {
         "key": "android-aar",
         "status": "shipping",
         "platform": "Android",
-        "format": "AAR",
-        "abis": [
-          "arm64-v8a",
-          "armeabi-v7a"
+        "format": "wrapper-zip containing AAR + metadata",
+        "filename": "android-kotlin-0.5.0-preview.2.zip",
+        "container_format": "wrapper-zip",
+        "tree": [
+          "payload/pine-billing-sdk-0.5.0-preview.2.aar",
+          "README.md",
+          "CHANGELOG.md",
+          "LICENSE.txt",
+          "METADATA.json",
+          "THIRD_PARTY_NOTICES.md"
         ],
-        "min_sdk": 21,
-        "filename": "pine-billing-sdk-0.5.0-preview.2.aar"
+        "abis": ["arm64-v8a", "armeabi-v7a"],
+        "min_sdk": 23,
+        "compile_sdk": 36,
+        "install_hint": "unzip; copy payload/pine-billing-sdk-0.5.0-preview.2.aar into your app/libs/; declare with implementation(files(\"libs/pine-billing-sdk-0.5.0-preview.2.aar\")); also declare implementation('net.java.dev.jna:jna:5.14.0@aar') AND implementation('com.google.code.gson:gson:2.11.0').",
+        "mandatory_runtime_deps": ["net.java.dev.jna:jna:5.14.0@aar", "com.google.code.gson:gson:2.11.0"]
       },
       {
         "key": "jvm-jar",
         "status": "shipping",
         "platform": "JVM (Linux/macOS/Windows)",
-        "format": "JAR with bundled native libs under META-INF/jniLibs/",
-        "filename": "pine-billing-sdk-0.5.0-preview.2.jar"
+        "format": "JAR with bundled native libs under META-INF/jniLibs/<triple>/",
+        "filename": "pine-billing-sdk-0.5.0-preview.2.jar",
+        "container_format": "raw-jar",
+        "supported_triples": ["linux-x86_64", "linux-aarch64", "macos-x86_64", "macos-arm64", "windows-x86_64"],
+        "install_hint": "drop on classpath alongside jna-5.14.0.jar and kotlin-stdlib; launch with `java -cp ...` (no Main-Class manifest).",
+        "mandatory_runtime_deps": ["net.java.dev.jna:jna:5.14.0", "org.jetbrains.kotlin:kotlin-stdlib:1.9.22+"]
       },
-      {
-        "key": "ios-xcframework",
-        "status": "roadmap",
-        "platform": "iOS",
-        "format": "XCFramework"
-      },
-      {
-        "key": "python-wheel-manylinux-x86_64",
-        "status": "roadmap",
-        "platform": "Linux",
-        "format": "wheel"
-      },
-      {
-        "key": "python-wheel-manylinux-aarch64",
-        "status": "roadmap",
-        "platform": "Linux",
-        "format": "wheel"
-      },
-      {
-        "key": "python-wheel-macos-x86_64",
-        "status": "roadmap",
-        "platform": "macOS",
-        "format": "wheel"
-      },
-      {
-        "key": "python-wheel-macos-arm64",
-        "status": "roadmap",
-        "platform": "macOS",
-        "format": "wheel"
-      },
-      {
-        "key": "python-wheel-windows-x86_64",
-        "status": "roadmap",
-        "platform": "Windows",
-        "format": "wheel"
-      },
-      {
-        "key": "nodejs-npm",
-        "status": "roadmap",
-        "platform": "any",
-        "format": "npm tarball with prebuilt binaries"
-      },
-      {
-        "key": "c-linux-x86_64",
-        "status": "roadmap",
-        "platform": "Linux",
-        "format": "header + .so"
-      },
-      {
-        "key": "c-linux-aarch64",
-        "status": "roadmap",
-        "platform": "Linux",
-        "format": "header + .so"
-      },
-      {
-        "key": "c-macos-universal",
-        "status": "roadmap",
-        "platform": "macOS",
-        "format": "header + .dylib (universal2)"
-      },
-      {
-        "key": "c-windows-x86_64",
-        "status": "roadmap",
-        "platform": "Windows",
-        "format": "header + .dll + .lib"
-      }
+      { "key": "ios-xcframework",              "status": "roadmap", "platform": "iOS",     "format": "XCFramework" },
+      { "key": "python-wheel-manylinux-x86_64","status": "roadmap", "platform": "Linux",   "format": "wheel" },
+      { "key": "python-wheel-manylinux-aarch64","status":"roadmap", "platform": "Linux",   "format": "wheel" },
+      { "key": "python-wheel-macos-x86_64",    "status": "roadmap", "platform": "macOS",   "format": "wheel" },
+      { "key": "python-wheel-macos-arm64",     "status": "roadmap", "platform": "macOS",   "format": "wheel" },
+      { "key": "python-wheel-windows-x86_64",  "status": "roadmap", "platform": "Windows", "format": "wheel" },
+      { "key": "nodejs-npm",                   "status": "roadmap", "platform": "any",     "format": "npm tarball with prebuilt binaries" },
+      { "key": "c-linux-x86_64",               "status": "roadmap", "platform": "Linux",   "format": "header + .so" },
+      { "key": "c-linux-aarch64",              "status": "roadmap", "platform": "Linux",   "format": "header + .so" },
+      { "key": "c-macos-universal",            "status": "roadmap", "platform": "macOS",   "format": "header + .dylib (universal2)" },
+      { "key": "c-windows-x86_64",             "status": "roadmap", "platform": "Windows", "format": "header + .dll + .lib" }
     ]
   },
   "cross_reference": {
@@ -672,45 +682,207 @@
         "eventid-and-reconciliation",
         "error-handling",
         "transports",
-        "threading"
-      ]
-    },
-    "cancel": {
-      "options_per_transport": {
-        "Cloud": "CloudCancelOptions"
-      },
-      "related_concepts": [
-        "eventid-and-reconciliation",
-        "lifecycle"
-      ]
-    },
-    "check_status": {
-      "result_model": "OperationStatus",
-      "options_per_transport": {
-        "Cloud": "CloudCheckStatusOptions"
-      },
-      "related_concepts": [
-        "eventid-and-reconciliation",
+        "threading",
         "result-payload"
       ]
     },
+    "cancel": {
+      "options_per_transport": { "Cloud": "CloudCancelOptions" },
+      "related_concepts": ["eventid-and-reconciliation", "lifecycle", "error-handling"]
+    },
+    "check_status": {
+      "result_model": "OperationStatus",
+      "options_per_transport": { "Cloud": "CloudCheckStatusOptions" },
+      "related_concepts": ["eventid-and-reconciliation", "result-payload"]
+    },
     "constructor": {
       "config_model": "SdkConfig",
-      "callbacks": [
-        "PlatformAppToAppBridge",
-        "PlatformBridge"
-      ],
-      "android_facade_signature": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)"
+      "callbacks": ["PlatformAppToAppBridge", "PlatformBridge"],
+      "android_facade_signature": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)",
+      "udl_canonical_signature": "PineBillingSdk(SdkConfig, PlatformAppToAppBridge?, PlatformBridge?)"
+    },
+    "test_print": {
+      "listener": "TestPrintListener",
+      "supported_on": ["AppToApp"]
+    },
+    "discover_terminals": {
+      "listener": "DiscoveryListener",
+      "supported_on": [],
+      "note": "Reserved API; all transports return NotSupported in 0.5.0-preview.2."
     },
     "upload_imei_list": {
       "options_model": "CloudUploadImeiListOptions",
-      "result_model": "UploadImeiListResult"
+      "result_model": "UploadImeiListResult",
+      "supported_on": ["Cloud"]
     }
+  },
+  "integration_blockers": {
+    "description": "Top runtime/compile errors first-time integrators have hit against 0.5.0-preview.2. Each entry is a one-shot lookup table for the client agent: match the symptom, apply the fix, surface the citation.",
+    "entries": [
+      {
+        "id": "BLOCK-1",
+        "severity": "blocker",
+        "binding": "android",
+        "phase": "runtime — Application.onCreate",
+        "symptom": "java.lang.NoClassDefFoundError: Failed resolution of: Lcom/sun/jna/Structure; at com.pinelabs.billing.sdk.PineBillingSdk.<init>(PineBillingSdk.kt:74)",
+        "root_cause": "JNA is not on the runtime classpath. The AAR does not bundle JNA.",
+        "fix": "Add implementation(\"net.java.dev.jna:jna:5.14.0@aar\") to app/build.gradle.kts. The @aar classifier is mandatory.",
+        "citation": "languages/android/setup.md §2; languages/android/errors.md row #1"
+      },
+      {
+        "id": "BLOCK-2",
+        "severity": "blocker",
+        "binding": "android",
+        "phase": "runtime — Application.onCreate (after BLOCK-1 is fixed)",
+        "symptom": "java.lang.NoClassDefFoundError: Failed resolution of: Lcom/google/gson/GsonBuilder; at com.pinelabs.billing.sdk.MasterAppTransport$Companion.defaultGson(MasterAppTransport.kt:260)",
+        "root_cause": "Gson is not on the runtime classpath. The AAR does not bundle Gson and MasterAppTransport.defaultGson() requires it.",
+        "fix": "Add implementation(\"com.google.code.gson:gson:2.11.0\") to app/build.gradle.kts.",
+        "citation": "languages/android/setup.md §2; languages/android/errors.md row #2"
+      },
+      {
+        "id": "BLOCK-3",
+        "severity": "high",
+        "binding": "android",
+        "phase": "compile — Gradle sync",
+        "symptom": "Manifest merger failed : uses-sdk:minSdkVersion 21 cannot be smaller than version 23 declared in library [androidx.core:core:1.18.0]",
+        "root_cause": "Modern AndroidX requires minSdk 23.",
+        "fix": "Set minSdk = 23 in defaultConfig.",
+        "citation": "languages/android/requirements.md; languages/android/setup.md §1"
+      },
+      {
+        "id": "BLOCK-4",
+        "severity": "high",
+        "binding": "any",
+        "phase": "compile — Java sample",
+        "symptom": "kotlin.UInt.constructor-impl is unresolved / cannot construct kotlin.UInt from Java.",
+        "root_cause": "kotlin.UInt has no public Java constructor.",
+        "fix": "Use the inline com.merchant.pos.Unsigned.toUInt(long) / .toULong(long) helper from languages/jvm/setup.md §5.",
+        "citation": "languages/jvm/setup.md §5; languages/android/examples.md; languages/jvm/examples.md"
+      },
+      {
+        "id": "BLOCK-5",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "compile — Kotlin",
+        "symptom": "Unresolved reference 'BuildConfig' in PineBillingApp.kt; or 'buildConfigField is not allowed because BuildConfig is disabled'.",
+        "root_cause": "AGP 8+ defaults buildFeatures.buildConfig = false.",
+        "fix": "android { buildFeatures { buildConfig = true } } in app/build.gradle.kts.",
+        "citation": "languages/android/integration.md §3; languages/android/setup.md §1"
+      },
+      {
+        "id": "BLOCK-6",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "runtime — first do_transaction",
+        "symptom": "do_transaction's onFailure fires with SdkError.TransactionFailed and an upstream rejection message; or upstream returns 'Unknown application id'.",
+        "root_cause": "BuildConfig.PINELABS_APP_ID was empty (project.findProperty returned null and ?: \"\" collapsed to empty).",
+        "fix": "Configure-time fail-fast: val appId = (project.findProperty(\"PINELABS_APP_ID\") as String?) ?: error(\"PINELABS_APP_ID not set — add it to ~/.gradle/gradle.properties\"). Sandbox/test value: 1001.",
+        "citation": "languages/android/integration.md §4"
+      },
+      {
+        "id": "BLOCK-7",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "runtime — bindService on Android 11+",
+        "symptom": "bindService returns false silently; SdkError.TransportUnavailable(\"AppToApp bridge bind failed: …\").",
+        "root_cause": "Missing <queries> entry for the upstream Pinelabs PoS package on Android 11+ package visibility.",
+        "fix": "Add <queries><package android:name=\"com.pinelabs.masterapp\" /></queries> to AndroidManifest.xml. Use adb shell pm list packages | grep pine to verify the actual upstream package on the merchant's terminal.",
+        "citation": "languages/android/setup.md §3; concepts/oem-terminal-registry.md"
+      },
+      {
+        "id": "BLOCK-8",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "runtime — release build",
+        "symptom": "java.lang.RuntimeException: Missing class uniffi.pine_billing... after R8 / ProGuard.",
+        "root_cause": "consumer-rules.pro inside the AAR has a typo (uniffi.pine_billing_sdk.** instead of uniffi.pine_billing.**).",
+        "fix": "Add -keep class uniffi.pine_billing.** { *; } to your app's proguard-rules.pro until the SDK ships the corrected consumer-rules.pro.",
+        "citation": "languages/android/errors.md row #8"
+      },
+      {
+        "id": "BLOCK-9",
+        "severity": "high",
+        "binding": "android",
+        "phase": "configure — AGP 9 / Kotlin 2.x",
+        "symptom": "Unresolved reference 'kotlinOptions' / 'jvmTarget' in app/build.gradle.kts.",
+        "root_cause": "kotlinOptions { … } block on the android { … } DSL was removed in AGP 9 / Kotlin 2.x.",
+        "fix": "Drop the kotlinOptions block. Either rely on android.compileOptions alone, or use kotlin { compilerOptions.jvmTarget = JvmTarget.JVM_17 } at the top level.",
+        "citation": "languages/android/setup.md §1; concepts/versioning-and-support.md (toolchain row)"
+      },
+      {
+        "id": "BLOCK-10",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "runtime — desugaring / R8",
+        "symptom": "Cryptic R8 / desugaring errors at release-build time.",
+        "root_cause": "compileOptions left at JavaVersion.VERSION_11 (vanilla AS template default). The SDK requires JDK 17.",
+        "fix": "Bump compileOptions { sourceCompatibility = VERSION_17; targetCompatibility = VERSION_17 }.",
+        "citation": "languages/android/setup.md §1"
+      },
+      {
+        "id": "BLOCK-11",
+        "severity": "medium",
+        "binding": "android",
+        "phase": "runtime — emulator",
+        "symptom": "java.lang.UnsatisfiedLinkError: dalvik.system.PathClassLoader … couldn't find \"libuniffi_pine_billing.so\".",
+        "root_cause": "The AAR ships only arm64-v8a + armeabi-v7a. Stock Android Studio emulators on Intel hosts are x86_64.",
+        "fix": "Test on a physical arm64-v8a / armeabi-v7a device, or on an arm64 emulator (Apple Silicon hosts only).",
+        "citation": "languages/android/requirements.md (top-of-file warning); languages/android/errors.md row #11"
+      },
+      {
+        "id": "BLOCK-12",
+        "severity": "medium",
+        "binding": "any",
+        "phase": "runtime — listener callback",
+        "symptom": "App calls sdk.doTransaction inside onSuccess / onFailure and the second call hangs forever.",
+        "root_cause": "The listener callback is delivered on the SDK's worker thread. Re-entering doTransaction from the same thread waits on the session lock.",
+        "fix": "Marshal to a fresh executor before re-entering: Executors.newSingleThreadExecutor().execute { sdk.doTransaction(...) }.",
+        "citation": "concepts/threading.md §4; models/TransactionListener.md"
+      },
+      {
+        "id": "BLOCK-13",
+        "severity": "low",
+        "binding": "android",
+        "phase": "runtime — Application.onCreate never runs",
+        "symptom": "PineBillingApp.onCreate() is never called; sdk is null when the first Activity tries to use it.",
+        "root_cause": "AndroidManifest.xml's <application> element is missing the android:name=\".PineBillingApp\" attribute.",
+        "fix": "Add android:name=\".PineBillingApp\" to the <application> element.",
+        "citation": "languages/android/integration.md §2"
+      },
+      {
+        "id": "BLOCK-14",
+        "severity": "low",
+        "binding": "android",
+        "phase": "build — duplicate native libs",
+        "symptom": "More than one file was found with OS independent path 'lib/arm64-v8a/libc++_shared.so'.",
+        "root_cause": "Two AARs bundle libc++_shared.so (e.g. this SDK + androidx.compose.ui indirectly).",
+        "fix": "android { packagingOptions { jniLibs.pickFirsts += \"**/libc++_shared.so\" } }.",
+        "citation": "languages/android/setup.md §2"
+      },
+      {
+        "id": "BLOCK-15",
+        "severity": "low",
+        "binding": "jvm",
+        "phase": "runtime",
+        "symptom": "Error: no main manifest attribute, in pine-billing-sdk-0.5.0-preview.2.jar",
+        "root_cause": "User ran java -jar pine-billing-sdk-…jar. The JAR is a library, not an executable.",
+        "fix": "Launch via java -cp \"pine-billing-sdk-…jar:jna-5.14.0.jar:kotlin-stdlib-…jar:your-app-classes/\" your.MainClass",
+        "citation": "languages/jvm/errors.md row #1"
+      }
+    ]
   },
   "doc_map": {
     "apis": "DOCS_ROOT/apis/<api_key>.md",
     "models": "DOCS_ROOT/models/<model_key>.md",
     "languages": "DOCS_ROOT/languages/<binding>/<file>.md",
     "concepts": "DOCS_ROOT/concepts/<concept_key>.md"
+  },
+  "totals": {
+    "apis": 16,
+    "models": 37,
+    "concepts": 12,
+    "languages": 6,
+    "language_files_per_binding": 6,
+    "total_files": 101
   }
 }

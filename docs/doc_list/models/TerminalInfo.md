@@ -4,28 +4,20 @@
 
 ## Purpose
 
-Static / diagnostic info about the connected terminal.
+Static / diagnostic info reported by the connected terminal. Returned by `get_terminal_info`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `model` | `string?` | - |  |
-| `firmware_version` | `string?` | - |  |
-| `serial_number` | `string?` | - |  |
-| `battery_percent` | `u8?` | - | 0..100. Null if not reported. |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `model` | `string?` | no | |
+| `firmware_version` | `string?` | no | |
+| `serial_number` | `string?` | no | |
+| `battery_percent` | `u8?` | no | 0..100. Null if terminal does not report battery. |
 
 ## Cross-references
 
-`get_terminal_info`
+`apis/get_terminal_info`
 
 ## Per-language naming
 

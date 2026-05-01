@@ -1,28 +1,20 @@
-# Model: `CheckStatusOptions` (sealed)
+# Model: `CheckStatusOptions` (sealed / [Enum] interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Per-call extras for check_status.
+Per-call transport-specific extras for `check_status`. v1 ships only the Cloud variant.
 
 ## Variants
 
 | Name | Signature | Notes |
 |---|---|---|
-| `Cloud` | `Cloud(CloudCheckStatusOptions)` | REQUIRED on Cloud. |
-
-## MUST
-
-- Use Cloud variant when active transport is Cloud; pass null otherwise.
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `Cloud` | `Cloud(CloudCheckStatusOptions options)` | Required when active transport is Cloud. |
 
 ## Cross-references
 
-`check_status`, `CloudCheckStatusOptions`
+`CloudCheckStatusOptions`, `apis/check_status`
 
 ## Per-language naming
 

@@ -4,26 +4,18 @@
 
 ## Purpose
 
-Severity for the SDK's logger port.
+Severity for the SDK's logger port. Maps to platform-native log levels in each binding.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
 | `Trace` | Most verbose. |
-| `Debug` | masked_pan and other low-sensitivity diagnostics may appear here. |
+| `Debug` | Diagnostic. `masked_pan` is logged only at this level or below. |
 | `Info` | Default. |
-| `Warn` | Recoverable anomalies. |
+| `Warn` | Recoverable issues. |
 | `Error` | Failures. |
-| `Off` | Disable all logging. |
-
-## MUST
-
-- Default to Info in production.
-
-## MUST NOT
-
-- Never log card data, PIN, full PAN, tokens, or keys at any level.
+| `Off` | No logging. |
 
 ## Cross-references
 

@@ -1,26 +1,60 @@
-# Language: Android — Setup
+# Android — Setup (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** This file is the canonical setup recipe. Do not invent additional dependencies. The AAR does NOT need JNA.
+> **AI INSTRUCTIONS:** Use the snippets below verbatim. Do NOT lower `minSdk` to `21`. Do NOT drop `@aar` from the JNA dependency. Do NOT replace Gson with another JSON library — the upstream wire format is hand-tuned for Gson.
 
-## 1. Drop the AAR into the project
+## 1. Receive the artifact
 
-Pinelabs ships the artifact as a direct file drop (no Maven Central
-yet). Place it under `app/libs/`:
+You will be sent `android-kotlin-0.5.0-preview.2.zip`. Unpack it to a temp directory:
 
 ```
-app/libs/pine-billing-sdk-0.5.0-preview.2.aar
+android-kotlin-0.5.0-preview.2/
+  payload/
+    pine-billing-sdk-0.5.0-preview.2.aar
+  README.md
+  CHANGELOG.md
+  LICENSE.txt
+  METADATA.json
+  THIRD_PARTY_NOTICES.md
 ```
 
-## 2. `app/build.gradle.kts`
+Verify the AAR's SHA-256 against the value in `METADATA.json` before installing.
+
+## 2. Place the AAR
+
+```
+app/
+  libs/
+    pine-billing-sdk-0.5.0-preview.2.aar
+```
+
+## 3. `app/build.gradle.kts`
 
 ```kotlin
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
 android {
     namespace = "com.merchant.pos"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
-        minSdk = 21
-        targetSdk = 33
+        applicationId = "com.merchant.pos"
+        minSdk = 23                                 // NOT 21 — JNA on Android needs API 23+
+        targetSdk = 35
+        versionCode = 1
+        versionName = "1.0"
+
+        // Provision the Pinelabs application id from a non-VCS file.
+        val pinelabsAppId = (project.findProperty("PINELABS_APP_ID") as String?)
+            ?: System.getenv("PINELABS_APP_ID")
+            ?: error("PINELABS_APP_ID not set (use ~/.gradle/gradle.properties or env)")
+        buildConfigField("String", "PINELABS_APP_ID", "\"$pinelabsAppId\"")
+    }
+
+    buildFeatures {
+        buildConfig = true                          // required by AGP 8+ for BuildConfig fields
     }
 
     compileOptions {
@@ -28,81 +62,106 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions { jvmTarget = "17" }
+    kotlin {
+        compilerOptions {
+            jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        }
+    }
 
     packaging {
-        jniLibs.useLegacyPackaging = false
-        // Avoid duplicate libc++_shared.so collisions when other AARs
-        // bundle the C++ runtime.
-        jniLibs.pickFirsts += setOf("**/libc++_shared.so")
+        jniLibs {
+            pickFirsts += "**/libc++_shared.so"     // dedup with JNA's copy
+        }
     }
 }
 
 dependencies {
     implementation(files("libs/pine-billing-sdk-0.5.0-preview.2.aar"))
-    // No JNA dependency — the AAR loads its native lib via
-    // System.loadLibrary directly.
-
-    // For coroutine-based dispatch (recommended):
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    implementation("net.java.dev.jna:jna:5.14.0@aar")        // mandatory; @aar variant only
+    implementation("com.google.code.gson:gson:2.11.0")        // mandatory
+    implementation("androidx.core:core-ktx:1.13.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation(platform("androidx.compose:compose-bom:2024.10.01"))
+    implementation("androidx.activity:activity-compose:1.9.3")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
 }
 ```
 
-## 3. `AndroidManifest.xml`
+> **JDK 17 enforcement:** AGP 9 requires JDK 17 for the Gradle worker. Use `gradle --version` to verify; if it shows JDK 11, set `org.gradle.java.home` in `~/.gradle/gradle.properties`.
+
+## 4. `~/.gradle/gradle.properties`
+
+Provision the Pinelabs application id outside source control:
+
+```
+PINELABS_APP_ID=1001
+```
+
+The sandbox value is `1001`. Production values are issued by your Pinelabs onboarding contact.
+
+## 5. `AndroidManifest.xml`
 
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Cloud transport: required if you call sdk over the network. -->
-    <uses-permission android:name="android.permission.INTERNET" />
-
-    <!--
-        AppToApp transport: MANDATORY on Android 11+ (API 30+).
-        Without this <queries> block, bindService() returns false even
-        if the upstream Pinelabs PoS package is installed.
-    -->
+    <!-- Required to look up the upstream Pinelabs PoS app on Android 11+. -->
     <queries>
         <package android:name="com.pinelabs.masterapp" />
     </queries>
 
-    <application … >
-        … your activities …
+    <application
+        android:name=".PineBillingApp"
+        android:label="POS"
+        android:theme="@style/Theme.Material3.DayNight">
+        <activity android:name=".MainActivity" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
     </application>
+
 </manifest>
 ```
 
-If your terminal vendor uses a different upstream package name, replace
-`com.pinelabs.masterapp` with the value documented for your terminal.
+> Confirm `com.pinelabs.masterapp` with your OEM contact before shipping. The package id may differ on partner-OEM devices.
 
-## 4. ProGuard / R8
+## 6. `PineBillingApp.kt`
 
-```proguard
-# UniFFI generated bindings
--keep class uniffi.pine_billing.** { *; }
-# Public façade
--keep class com.pinelabs.billing.sdk.** { *; }
-# Listener implementations referenced via UniFFI's reflection.
--keepclassmembers class ** implements uniffi.pine_billing.TransactionListener { *; }
--keepclassmembers class ** implements uniffi.pine_billing.TestPrintListener  { *; }
--keepclassmembers class ** implements uniffi.pine_billing.DiscoveryListener  { *; }
--keepclassmembers class ** implements uniffi.pine_billing.PlatformAppToAppBridge { *; }
--keepclassmembers class ** implements uniffi.pine_billing.PlatformBridge { *; }
+```kotlin
+package com.merchant.pos
+
+import android.app.Application
+import com.pinelabs.billing.sdk.PineBillingSdk
+import uniffi.pine_billing.SdkConfig
+import uniffi.pine_billing.AppToAppConfig
+import uniffi.pine_billing.TransportType
+
+class PineBillingApp : Application() {
+    lateinit var sdk: PineBillingSdk
+        private set
+
+    override fun onCreate() {
+        super.onCreate()
+        val config = SdkConfig(
+            defaultTimeoutMs = 60_000u,
+            logLevel = null,
+            transport = TransportType.APP_TO_APP,
+            appToApp = AppToAppConfig(userId = "POS-USER", version = "1.0"),
+            applicationId = BuildConfig.PINELABS_APP_ID,
+            cloud = null,
+            padController = null,
+        )
+        sdk = PineBillingSdk(this, config, /*platformBridge*/ null)
+    }
+}
 ```
 
-## 5. Imports cheat-sheet
+The SDK is constructed once per process and reused.
 
-The SDK splits its public surface across two packages — both are
-**public**:
+## 7. First-build sanity
 
-| Package | Contains | Import? |
-|---|---|---|
-| `com.pinelabs.billing.sdk` | `PineBillingSdk` (the façade), `AndroidSystemBridge`, `MasterAppTransport` | ✅ yes |
-| `uniffi.pine_billing` | All models, enums, listeners (`SdkConfig`, `TransactionRequest`, `TransactionListener`, `SdkException`, …) | ✅ yes — merchants MUST import models from here |
+Run `./gradlew :app:assembleDebug` once. If you see `Unresolved reference: BuildConfig`, recheck `buildConfig = true`. If you see `UnsatisfiedLinkError: libuniffi_pine_billing` at runtime on an emulator, switch to an arm64 image.
 
-Anything under `com.pinelabs.billing.sdk.internal.*` is implementation
-detail; do NOT import.
-
-## Next docs
-
-`android/integration`, `android/examples`, `android/errors`,
-`android/distribution`.
+See `errors.md` § "First-run sanity check" for the full triage table.

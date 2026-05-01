@@ -1,13 +1,12 @@
 # Concept: capabilities
 
 > **AI INSTRUCTIONS:** Use this matrix to refuse to emit a method call when the active transport does not support it. The SDK will raise `NotSupported` at runtime; catching it earlier in generated code is preferred.
->
-> The matrix below reflects what is **actually implemented in v1** of each
-> adapter (SDK version `0.5.0-preview.2`). The PADController adapter ships
-> with a deliberately small surface — `do_transaction`, probe-style
-> connect / disconnect, and `restart` — and reports `NotSupported` for
-> everything else, even the methods many merchants associate with a
-> Bluetooth/USB/Serial terminal. Do not assume parity with future releases.
+
+This matrix reflects what is actually implemented in **v1** of each
+adapter (SDK version `0.5.0-preview.2`). The PADController adapter
+ships with a deliberately small surface — `do_transaction` + connect
+family + `restart` — and reports `NotSupported` for everything else.
+Do not assume parity with future releases.
 
 ## v1 capability matrix (authoritative)
 
@@ -28,12 +27,12 @@
 | `restart` | ✗ `NotSupported` | ✗ `NotSupported` | ✗ `NotSupported` | ✓ (requires `PlatformBridge`) |
 | `upload_imei_list` | ✗ `NotSupported` | ✗ `NotSupported` | ✓ | ✗ `NotSupported` |
 
-**†** AppToApp binds the upstream Pinelabs PoS service per call. `connect` /
-`disconnect` are accepted as no-ops; `is_connected` returns `true` only
-while a call is in flight.
+**†** AppToApp binds the upstream Pinelabs PoS service per call.
+`connect` / `disconnect` are accepted as no-ops; `is_connected`
+returns `true` only while a call is in flight.
 
 **◊** AppToApp protocol exposes neither cancel nor reconciliation
-endpoints. Use `Cloud` if you need cancel/reconciliation.
+endpoints. Use `Cloud` if you need cancel / reconciliation.
 
 **※** `Tcp` is a v1 placeholder; every method raises `NotSupported`
 until the adapter ships.
@@ -57,4 +56,4 @@ the matrix is updated.
 
 ## Next docs
 
-`transports`, `error-handling`, `distribution`, `threading`.
+`transports`, `error-handling`, `threading`.

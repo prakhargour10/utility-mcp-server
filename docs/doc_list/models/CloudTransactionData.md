@@ -4,43 +4,35 @@
 
 ## Purpose
 
-Structured payload returned alongside check_status on Cloud once settled. 18 typed fields plus passthrough metadata.
+Structured payload returned alongside `check_status` for the Cloud transport. Unknown tags fall through into `metadata`.
 
 ## Fields
 
-| Name | Type | Required | Notes |
-|---|---|---|---|
-| `tid` | `string?` | - |  |
-| `mid` | `string?` | - |  |
-| `payment_mode` | `string?` | - |  |
-| `amount` | `string?` | - |  |
-| `batch_number` | `string?` | - |  |
-| `rrn` | `string?` | - |  |
-| `approval_code` | `string?` | - |  |
-| `invoice_number` | `string?` | - |  |
-| `customer_vpa` | `string?` | - |  |
-| `acquirer_id` | `string?` | - |  |
-| `acquirer_name` | `string?` | - |  |
-| `transaction_date` | `string?` | - |  |
-| `transaction_time` | `string?` | - |  |
-| `amount_in_paisa` | `string?` | - |  |
-| `original_amount` | `string?` | - |  |
-| `final_amount` | `string?` | - |  |
-| `transaction_log_id` | `string?` | - |  |
-| `currency_minor_unit` | `string?` | - |  |
-| `metadata` | `record<string,string>` | yes | Unknown upstream tags fall through here keyed by verbatim tag. |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-_(no anti-patterns)_
+| Name | Type | Required |
+|---|---|---|
+| `tid` | `string?` | - |
+| `mid` | `string?` | - |
+| `payment_mode` | `string?` | - |
+| `amount` | `string?` | - |
+| `batch_number` | `string?` | - |
+| `rrn` | `string?` | - |
+| `approval_code` | `string?` | - |
+| `invoice_number` | `string?` | - |
+| `customer_vpa` | `string?` | - |
+| `acquirer_id` | `string?` | - |
+| `acquirer_name` | `string?` | - |
+| `transaction_date` | `string?` | - |
+| `transaction_time` | `string?` | - |
+| `amount_in_paisa` | `string?` | - |
+| `original_amount` | `string?` | - |
+| `final_amount` | `string?` | - |
+| `transaction_log_id` | `string?` | - |
+| `currency_minor_unit` | `string?` | - |
+| `metadata` | `record<string,string>` | yes (may be empty) |
 
 ## Cross-references
 
-`OperationStatus`, `check_status`
+`OperationStatus`, `apis/check_status`
 
 ## Per-language naming
 

@@ -10,7 +10,7 @@ constructor → [active] → (disconnect)? → drop
 
 - One instance per process.
 - `set_transport` swaps the active transport in place. Implicit `disconnect()` of the previous transport.
-- Drop / dispose closes any open transport link.
+- Drop / dispose closes any open transport link (Android façade implements `AutoCloseable`).
 
 ## Transaction lifecycle
 
@@ -22,14 +22,16 @@ do_transaction(...)
    │
    └── accepted
        │
-       ├── on_started(event_id)        ← exactly once
+       ├── on_started(event_id)        ← exactly once, on SDK worker thread
        │
-       └── exactly one of:
+       └── exactly one of:             ← on the same SDK worker thread, serialised
            ├── on_success(TransactionResult)
            └── on_failure(SdkError)
 ```
 
-For Cloud, `on_success` may carry `status = Pending`. The merchant then drives subsequent state via `check_status` until `state ∈ {Completed, Failed, Cancelled}`.
+For Cloud, `on_success` may carry `status = Pending`. The merchant
+then drives subsequent state via `check_status` until
+`state ∈ {Completed, Failed, Cancelled}`.
 
 ## Callback threading contract
 
@@ -51,4 +53,4 @@ For Cloud, `on_success` may carry `status = Pending`. The merchant then drives s
 
 ## Next docs
 
-`eventid-and-reconciliation`, `error-handling`.
+`threading`, `eventid-and-reconciliation`, `error-handling`.

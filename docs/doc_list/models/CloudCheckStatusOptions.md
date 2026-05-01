@@ -4,27 +4,19 @@
 
 ## Purpose
 
-Cloud check_status extras.
+Cloud check_status extras. Required when active transport is Cloud.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `merchant_id` | `string` | yes |  |
-| `security_token` | `string` | yes |  |
-| `identity` | `CloudIdentity` | yes |  |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-- Do not log security_token.
+| `merchant_id` | `string` | yes | |
+| `security_token` | `string` | yes | Never log. |
+| `identity` | `CloudIdentity` | yes | |
 
 ## Cross-references
 
-`CheckStatusOptions`, `CloudIdentity`
+`CheckStatusOptions`, `CloudIdentity`, `apis/check_status`
 
 ## Per-language naming
 

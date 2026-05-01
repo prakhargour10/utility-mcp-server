@@ -1,27 +1,20 @@
 # API: `run_self_test`
 
-> **AI INSTRUCTIONS:** This file describes the public method `run_self_test` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `run_self_test` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
 ```
-run_self_test() -> SelfTestResult
+SelfTestResult run_self_test()
 ```
 
 ## Purpose
 
 Trigger a terminal self-test and wait for the result.
 
-## Parameters
-
-_None._
-
-
 ## Returns
 
-SelfTestResult{passed, details[]}.
+`SelfTestResult`.
 
 ## Delivery model
 
@@ -29,18 +22,16 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport.
-- **`SdkError.NotConnected`** — No link.
-- **`SdkError.Timeout`** — No reply.
-- **`SdkError.TransportError`** — Link failure.
+- **`SdkError.NotSupported`** — All v1 transports raise this.
+- **`SdkError.NotConnected`** — No active link.
 
 ## MUST
 
-_(no positive obligations beyond the signature)_
+- Skip in v1 — every transport raises NotSupported.
 
 ## MUST NOT
 
-_(no anti-patterns specific to this API)_
+- Do not call from the Android main thread — the façade throws.
 
 ## Transport support matrix
 
@@ -56,29 +47,25 @@ _(no anti-patterns specific to this API)_
 ### Android (Kotlin) — shipping
 
 ```kotlin
-val r: SelfTestResult = sdk.runSelfTest()
+val result: SelfTestResult = sdk.runSelfTest()
 ```
 
 ### Android (Java) — shipping
 
 ```java
-SelfTestResult r = sdk.runSelfTest();
+SelfTestResult result = sdk.runSelfTest();
 ```
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
-val r: SelfTestResult = sdk.runSelfTest()
+val result: SelfTestResult = sdk.runSelfTest()
 ```
 
 ### JVM (Java) — shipping
 
 ```java
-SelfTestResult r = sdk.runSelfTest();
+SelfTestResult result = sdk.runSelfTest();
 ```
 
 ### Swift (iOS) — roadmap
@@ -86,7 +73,7 @@ SelfTestResult r = sdk.runSelfTest();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-let r = try sdk.runSelfTest()
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -94,7 +81,7 @@ let r = try sdk.runSelfTest()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-r = sdk.run_self_test()
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -102,7 +89,7 @@ r = sdk.run_self_test()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-const r = sdk.runSelfTest();
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -110,18 +97,15 @@ const r = sdk.runSelfTest();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_run_self_test(sdk, &out, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `SelfTestResult`, `SdkError`
-- Concepts: `capabilities`
+- Concepts: `capabilities`, `error-handling`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

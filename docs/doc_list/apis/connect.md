@@ -1,8 +1,6 @@
 # API: `connect`
 
-> **AI INSTRUCTIONS:** This file describes the public method `connect` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `connect` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
@@ -12,18 +10,11 @@ connect(Terminal terminal)
 
 ## Purpose
 
-Establish the link to the given terminal. No-op for AppToApp / Cloud (which bind per call).
-
-## Parameters
-
-| Name | Type | Required | Notes |
-|---|---|---|---|
-| `terminal` | `Terminal` | yes | Must have terminal.transport == active transport. |
-
+Establish the link to the given terminal. Required by transports that have a separate connect step (PADController, future BT/USB/TCP) and a no-op for transports that bind per-call (AppToApp, Cloud).
 
 ## Returns
 
-void.
+`void`.
 
 ## Delivery model
 
@@ -31,54 +22,54 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.InvalidInput`** — terminal.transport != active.
-- **`SdkError.NotSupported`** — Active transport has no discovery/connection model.
-- **`SdkError.TransportUnavailable`** — Could not reach the terminal.
+- **`SdkError.InvalidInput`** — `terminal.transport` is not the active transport.
+- **`SdkError.NotSupported`** — Active transport does not support discovery / connection (today: not raised by AppToApp / Cloud — they no-op; PADController accepts; Tcp placeholder).
+- **`SdkError.TransportError`** — Probe failed.
 
 ## MUST
 
-- Always pass a Terminal returned by discover_terminals on the same active transport.
+- Wrap the call in a platform-idiomatic background dispatcher (Android: `Dispatchers.IO`).
 
 ## MUST NOT
 
-- Do not construct a Terminal by hand for transports that require discovery.
+- Do not call from the Android main thread — the façade throws.
 
 ## Transport support matrix
 
 | Transport | v1 behaviour |
 |---|---|
 | AppToApp | no-op (binds per call) |
-| Tcp | ✗ `NotSupported` (v1 placeholder) |
+| Tcp | ✗ `NotSupported` |
 | Cloud | no-op (HTTPS per call) |
-| PadController | ✓ probe-style |
+| PadController | ✓ probe-only |
 
 ## Per-language call shapes
 
 ### Android (Kotlin) — shipping
 
 ```kotlin
+val terminal = Terminal(id = "127.0.0.1:8082", transport = TransportType.PAD_CONTROLLER, displayName = null, model = null, serialNumber = null)
 sdk.connect(terminal)
 ```
 
 ### Android (Java) — shipping
 
 ```java
+Terminal terminal = new Terminal("127.0.0.1:8082", TransportType.PAD_CONTROLLER, null, null, null);
 sdk.connect(terminal);
 ```
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
+val terminal = Terminal(id = "127.0.0.1:8082", transport = TransportType.PAD_CONTROLLER, displayName = null, model = null, serialNumber = null)
 sdk.connect(terminal)
 ```
 
 ### JVM (Java) — shipping
 
 ```java
+Terminal terminal = new Terminal("127.0.0.1:8082", TransportType.PAD_CONTROLLER, null, null, null);
 sdk.connect(terminal);
 ```
 
@@ -87,7 +78,7 @@ sdk.connect(terminal);
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-try sdk.connect(terminal: terminal)
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -95,7 +86,7 @@ try sdk.connect(terminal: terminal)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-sdk.connect(terminal=terminal)
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -103,7 +94,7 @@ sdk.connect(terminal=terminal)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-sdk.connect(terminal);
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -111,18 +102,15 @@ sdk.connect(terminal);
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_connect(sdk, &terminal, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `Terminal`, `TransportType`, `SdkError`
-- Concepts: `transports`, `capabilities`
+- Concepts: `transports`, `capabilities`, `lifecycle`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

@@ -1,8 +1,6 @@
 # API: `restart`
 
-> **AI INSTRUCTIONS:** This file describes the public method `restart` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `restart` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
@@ -12,16 +10,11 @@ restart()
 
 ## Purpose
 
-Request a restart of the upstream service the active transport depends on. Fire-and-forget.
-
-## Parameters
-
-_None._
-
+Request a restart of the upstream service the active transport depends on. Used to recover from upstream-daemon failures without tearing down the SDK.
 
 ## Returns
 
-void on dispatched.
+`void`.
 
 ## Delivery model
 
@@ -29,18 +22,19 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport has no restartable upstream daemon (AppToApp, Cloud).
-- **`SdkError.OperationInProgress`** — In-flight listener op.
-- **`SdkError.TransportUnavailable`** — PlatformBridge missing.
-- **`SdkError.TransportError`** — Bridge dispatched but mechanism failed.
+- **`SdkError.NotSupported`** — Active transport has no recoverable upstream daemon (today: AppToApp, Cloud, Tcp).
+- **`SdkError.OperationInProgress`** — A listener-style operation is in flight; restart is gated against in-flight work.
+- **`SdkError.TransportUnavailable`** — Active transport requires a `PlatformBridge` and none was supplied at construction.
+- **`SdkError.TransportError`** — Host bridge dispatched but the restart mechanism itself failed.
 
 ## MUST
 
-- Verify recovery via the next connect() / do_transaction().
+- On Android, supply an `AndroidSystemBridge(context)` at construction.
+- Recovery is verified by the next `connect()` or `do_transaction()` — restart itself is fire-and-forget.
 
 ## MUST NOT
 
-_(no anti-patterns specific to this API)_
+- Do not assume the daemon is back online when `restart()` returns — verify by re-attempting a transport call.
 
 ## Transport support matrix
 
@@ -49,14 +43,13 @@ _(no anti-patterns specific to this API)_
 | AppToApp | ✗ `NotSupported` |
 | Tcp | ✗ `NotSupported` |
 | Cloud | ✗ `NotSupported` |
-| PadController | ✓ — requires `PlatformBridge` |
+| PadController | ✓ requires `PlatformBridge` |
 
 ## Per-language call shapes
 
 ### Android (Kotlin) — shipping
 
 ```kotlin
-// PADController only — requires AndroidSystemBridge at construction.
 sdk.restart()
 ```
 
@@ -68,12 +61,7 @@ sdk.restart();
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
-// PADController only — requires AndroidSystemBridge at construction.
 sdk.restart()
 ```
 
@@ -88,7 +76,7 @@ sdk.restart();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-try sdk.restart()
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -96,7 +84,7 @@ try sdk.restart()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-sdk.restart()
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -104,7 +92,7 @@ sdk.restart()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-sdk.restart();
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -112,18 +100,15 @@ sdk.restart();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_restart(sdk, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `PlatformBridge`, `SdkError`
-- Concepts: `transports`
+- Concepts: `capabilities`, `error-handling`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

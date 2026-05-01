@@ -49,7 +49,7 @@ DEFAULT_TOP_K = 4
 # number of tokens actually produced, so keep this tight. Override per
 # call via the `max_tokens` argument if a user explicitly asks for a
 # long-form answer.
-DEFAULT_MAX_TOKENS = 1024
+DEFAULT_MAX_TOKENS = 2000
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_TIMEOUT = 60.0
 

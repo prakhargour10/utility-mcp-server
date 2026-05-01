@@ -1,0 +1,481 @@
+{
+  "schema_version": "1.0",
+  "sdk": {
+    "name": "Pine Billing SDK",
+    "package_id": "pine-billing-sdk",
+    "rust_crate": "pine-billing-ffi",
+    "native_library": "libpine_billing_sdk",
+    "uniffi_namespace": "pine_billing",
+    "public_class": "PineBillingSdk",
+    "current_version": "0.1.0",
+    "supported_languages": [
+      "android",
+      "ios",
+      "python",
+      "nodejs",
+      "c"
+    ],
+    "supported_transports": [
+      "AppToApp",
+      "Tcp",
+      "Bluetooth",
+      "Usb",
+      "Serial",
+      "Cloud"
+    ],
+    "default_currency": "INR",
+    "amount_unit": "paise (lowest currency unit, integer)",
+    "event_id_format": "UUIDv4 (SDK-allocated; merchants never create one)"
+  },
+  "mcp_setup": {
+    "description": "Variables the client LLM SHOULD set on its session before generating SDK code or instructing the user.",
+    "variables": {
+      "DOCS_ROOT": "absolute path to this doc bundle on disk",
+      "TARGET_LANGUAGE": "one of android | ios | python | nodejs | c \u2014 ask the user if not known",
+      "TARGET_TRANSPORT": "one of AppToApp | Cloud | PadController | Tcp \u2014 ask the user; AppToApp is default on Android, Cloud is default for server-side merchants",
+      "SDK_VERSION": "exact version requested by the user; default to sdk.current_version",
+      "MERCHANT_ID": "supplied by Pinelabs onboarding; required on Cloud + on TransactionRequest for non-AppToApp transports",
+      "TERMINAL_ID": "supplied by Pinelabs onboarding; required on TransactionRequest for non-AppToApp transports",
+      "APPLICATION_ID": "Pinelabs-provisioned app identifier; required for AppToApp",
+      "CLOUD_BASE_URL": "https://\u2026 (host only, no path) \u2014 required when TARGET_TRANSPORT == Cloud",
+      "CLOUD_SECURITY_TOKEN": "per-call secret; never log, never embed in source",
+      "ENABLE_DEBUG_LOGS": "true|false; maps to LogLevel"
+    },
+    "workflow": [
+      "1. Always call get_documentation_list FIRST and cache the response for the session.",
+      "2. Resolve TARGET_LANGUAGE and TARGET_TRANSPORT (ask the user if missing).",
+      "3. Fetch language doc:  get_documentation(category='language', key=TARGET_LANGUAGE).",
+      "4. Fetch concepts you need:  get_documentation(category='concept', key='lifecycle' | 'transports' | 'error-handling' | \u2026).",
+      "5. For every UDL symbol you intend to emit in code, fetch its model or api doc by key BEFORE writing the code. Do not hallucinate fields.",
+      "6. Use get_sdk(artifact_key=\u2026) to give the user a real download URL/coordinate; never invent one.",
+      "7. Re-fetch on every new conversation \u2014 docs evolve with SDK_VERSION."
+    ],
+    "rules_for_generated_code": [
+      "Amounts are u64 paise; reject negatives, reject > 99_999_999.",
+      "currency MUST be 3 ASCII uppercase letters or null (defaults to INR).",
+      "event_id is allocated by the SDK \u2014 never construct a UUID and pass it in.",
+      "original_event_id is required iff transaction_type \u2208 {Refund, Void, Capture}, rejected otherwise.",
+      "transport_options variant MUST match the active transport; mismatch raises InvalidInput.",
+      "On Cloud, transport_options is REQUIRED on do_transaction; cancel/check_status options are REQUIRED.",
+      "Listener callbacks fire on an SDK-internal thread. Generated UI code MUST marshal to the platform UI thread before touching widgets.",
+      "Never log card data, PIN, CVV, full PAN, tokens, or keys. masked_pan only at debug.",
+      "Only one operation per SDK instance at a time \u2014 disable the trigger control on on_started, re-enable on on_success / on_failure."
+    ]
+  },
+  "tools": {
+    "get_documentation_list": {
+      "purpose": "Master index. Call once per session. Returns this payload.",
+      "args": {},
+      "returns": "This JSON (cached as DOCS_ROOT/index.md is its on-disk equivalent)."
+    },
+    "get_documentation": {
+      "purpose": "Fetch a single detailed doc file.",
+      "args": {
+        "category": "one of: api | model | language | concept",
+        "key": "value from the matching key registry below"
+      },
+      "returns": "Markdown body of DOCS_ROOT/<category>s/<key>.md (note: 'api'\u2192apis/, 'model'\u2192models/, 'language'\u2192languages/, 'concept'\u2192concepts/).",
+      "examples": [
+        {
+          "category": "api",
+          "key": "do_transaction"
+        },
+        {
+          "category": "model",
+          "key": "TransactionRequest"
+        },
+        {
+          "category": "language",
+          "key": "android"
+        },
+        {
+          "category": "concept",
+          "key": "lifecycle"
+        }
+      ]
+    },
+    "get_sdk": {
+      "purpose": "Resolve a downloadable SDK artifact for a given target.",
+      "args": {
+        "artifact_key": "value from artifact_keys below",
+        "version": "optional; defaults to sdk.current_version"
+      },
+      "returns": "{ url, sha256, size_bytes, license, install_hint }"
+    }
+  },
+  "key_registries": {
+    "api_keys": [
+      {
+        "key": "constructor",
+        "signature": "PineBillingSdk(SdkConfig, PlatformAppToAppBridge?, PlatformBridge?)",
+        "throws": [
+          "InvalidInput",
+          "TransportUnavailable"
+        ]
+      },
+      {
+        "key": "do_transaction",
+        "signature": "do_transaction(TransactionRequest, TransactionListener)",
+        "throws": [
+          "InvalidInput",
+          "OperationInProgress",
+          "NotConnected",
+          "TransportUnavailable",
+          "NotSupported"
+        ],
+        "delivery": "async via TransactionListener"
+      },
+      {
+        "key": "cancel",
+        "signature": "cancel(string event_id, CancelOptions?)",
+        "throws": [
+          "InvalidInput",
+          "NotSupported",
+          "TransportError",
+          "Timeout",
+          "Network",
+          "ConnectionTimeout",
+          "ReadTimeout",
+          "NonSuccessHttp"
+        ]
+      },
+      {
+        "key": "check_status",
+        "signature": "check_status(string event_id, CheckStatusOptions?) -> OperationStatus",
+        "throws": [
+          "InvalidInput",
+          "NotSupported",
+          "Network",
+          "Timeout",
+          "ConnectionTimeout",
+          "ReadTimeout",
+          "NonSuccessHttp"
+        ]
+      },
+      {
+        "key": "connect",
+        "signature": "connect(Terminal)",
+        "throws": [
+          "InvalidInput",
+          "NotSupported",
+          "TransportUnavailable"
+        ]
+      },
+      {
+        "key": "disconnect",
+        "signature": "disconnect()",
+        "throws": [
+          "TransportError"
+        ]
+      },
+      {
+        "key": "is_connected",
+        "signature": "is_connected() -> boolean",
+        "throws": []
+      },
+      {
+        "key": "discover_terminals",
+        "signature": "discover_terminals(DiscoveryListener)",
+        "throws": [
+          "NotSupported"
+        ],
+        "delivery": "async via DiscoveryListener"
+      },
+      {
+        "key": "ping",
+        "signature": "ping()",
+        "throws": [
+          "NotSupported",
+          "NotConnected",
+          "Timeout",
+          "TransportError"
+        ]
+      },
+      {
+        "key": "run_self_test",
+        "signature": "run_self_test() -> SelfTestResult",
+        "throws": [
+          "NotSupported",
+          "NotConnected",
+          "Timeout",
+          "TransportError"
+        ]
+      },
+      {
+        "key": "get_logs",
+        "signature": "get_logs() -> TerminalLogs",
+        "throws": [
+          "NotSupported",
+          "NotConnected",
+          "Timeout",
+          "TransportError"
+        ]
+      },
+      {
+        "key": "get_terminal_info",
+        "signature": "get_terminal_info() -> TerminalInfo",
+        "throws": [
+          "NotSupported",
+          "NotConnected",
+          "Timeout",
+          "TransportError"
+        ]
+      },
+      {
+        "key": "test_print",
+        "signature": "test_print(TestPrintListener)",
+        "throws": [
+          "NotSupported",
+          "NotConnected",
+          "OperationInProgress",
+          "TransportUnavailable"
+        ],
+        "delivery": "async via TestPrintListener"
+      },
+      {
+        "key": "set_transport",
+        "signature": "set_transport(TransportType)",
+        "throws": [
+          "InvalidInput"
+        ]
+      },
+      {
+        "key": "restart",
+        "signature": "restart()",
+        "throws": [
+          "NotSupported",
+          "OperationInProgress",
+          "TransportUnavailable",
+          "TransportError"
+        ]
+      },
+      {
+        "key": "upload_imei_list",
+        "signature": "upload_imei_list(CloudUploadImeiListOptions) -> UploadImeiListResult",
+        "throws": [
+          "NotSupported",
+          "InvalidInput",
+          "Network",
+          "Timeout",
+          "ConnectionTimeout",
+          "ReadTimeout",
+          "NonSuccessHttp"
+        ]
+      }
+    ],
+    "model_keys": {
+      "errors": [
+        "SdkError"
+      ],
+      "enums": [
+        "TransactionType",
+        "TransactionStatus",
+        "TransportType",
+        "OperationState",
+        "LogLevel",
+        "PaymentMode",
+        "CloudType"
+      ],
+      "config": [
+        "SdkConfig",
+        "AppToAppConfig",
+        "CloudConfig",
+        "CloudIdentity",
+        "PadControllerConfig"
+      ],
+      "request": [
+        "TransactionRequest",
+        "TransportOptions",
+        "AppToAppTransactionOptions",
+        "CloudTransactionOptions",
+        "PadControllerTransactionOptions",
+        "CancelOptions",
+        "CloudCancelOptions",
+        "CheckStatusOptions",
+        "CloudCheckStatusOptions",
+        "CloudUploadImeiListOptions",
+        "CloudImeiListItem"
+      ],
+      "result": [
+        "TransactionResult",
+        "OperationStatus",
+        "CloudTransactionData",
+        "UploadImeiListResult",
+        "Terminal",
+        "TerminalInfo",
+        "TerminalLogs",
+        "SelfTestResult"
+      ],
+      "callbacks": [
+        "TransactionListener",
+        "TestPrintListener",
+        "DiscoveryListener",
+        "PlatformAppToAppBridge",
+        "PlatformBridge"
+      ]
+    },
+    "language_keys": [
+      {
+        "key": "android",
+        "binding": "Kotlin",
+        "package_manager": "Maven/Gradle",
+        "artifact": "pine-billing-sdk-<ver>.aar",
+        "namespace": "com.pinelabs.billing.sdk"
+      },
+      {
+        "key": "ios",
+        "binding": "Swift",
+        "package_manager": "SwiftPM, CocoaPods",
+        "artifact": "PineBillingSdk.xcframework",
+        "module": "PineBillingSdk"
+      },
+      {
+        "key": "python",
+        "binding": "Python",
+        "package_manager": "pip",
+        "artifact": "pine_billing_sdk-<ver>-*.whl",
+        "module": "pine_billing"
+      },
+      {
+        "key": "nodejs",
+        "binding": "Node.js",
+        "package_manager": "npm",
+        "artifact": "@pinelabs/pine-billing-sdk",
+        "module": "@pinelabs/pine-billing-sdk"
+      },
+      {
+        "key": "c",
+        "binding": "C",
+        "package_manager": "tar/zip",
+        "artifact": "pine_billing_sdk-<ver>-<triple>.tgz",
+        "header": "pine_billing.h"
+      }
+    ],
+    "concept_keys": [
+      "overview",
+      "lifecycle",
+      "transports",
+      "capabilities",
+      "error-handling",
+      "result-payload",
+      "eventid-and-reconciliation",
+      "versioning-and-support"
+    ],
+    "artifact_keys": [
+      {
+        "key": "android-aar",
+        "platform": "Android",
+        "format": "AAR"
+      },
+      {
+        "key": "ios-xcframework",
+        "platform": "iOS",
+        "format": "XCFramework"
+      },
+      {
+        "key": "python-wheel-manylinux-x86_64",
+        "platform": "Linux",
+        "format": "wheel"
+      },
+      {
+        "key": "python-wheel-manylinux-aarch64",
+        "platform": "Linux",
+        "format": "wheel"
+      },
+      {
+        "key": "python-wheel-macos-x86_64",
+        "platform": "macOS",
+        "format": "wheel"
+      },
+      {
+        "key": "python-wheel-macos-arm64",
+        "platform": "macOS",
+        "format": "wheel"
+      },
+      {
+        "key": "python-wheel-windows-x86_64",
+        "platform": "Windows",
+        "format": "wheel"
+      },
+      {
+        "key": "nodejs-npm",
+        "platform": "any",
+        "format": "npm tarball with prebuilt binaries"
+      },
+      {
+        "key": "c-linux-x86_64",
+        "platform": "Linux",
+        "format": "header + .so"
+      },
+      {
+        "key": "c-linux-aarch64",
+        "platform": "Linux",
+        "format": "header + .so"
+      },
+      {
+        "key": "c-macos-universal",
+        "platform": "macOS",
+        "format": "header + .dylib (universal2)"
+      },
+      {
+        "key": "c-windows-x86_64",
+        "platform": "Windows",
+        "format": "header + .dll + .lib"
+      }
+    ]
+  },
+  "cross_reference": {
+    "do_transaction": {
+      "request_model": "TransactionRequest",
+      "result_model": "TransactionResult",
+      "listener": "TransactionListener",
+      "transport_specific_options": {
+        "AppToApp": "AppToAppTransactionOptions",
+        "Cloud": "CloudTransactionOptions",
+        "PadController": "PadControllerTransactionOptions"
+      },
+      "related_concepts": [
+        "lifecycle",
+        "eventid-and-reconciliation",
+        "error-handling",
+        "transports"
+      ]
+    },
+    "cancel": {
+      "options_per_transport": {
+        "Cloud": "CloudCancelOptions"
+      },
+      "related_concepts": [
+        "eventid-and-reconciliation",
+        "lifecycle"
+      ]
+    },
+    "check_status": {
+      "result_model": "OperationStatus",
+      "options_per_transport": {
+        "Cloud": "CloudCheckStatusOptions"
+      },
+      "related_concepts": [
+        "eventid-and-reconciliation",
+        "result-payload"
+      ]
+    },
+    "constructor": {
+      "config_model": "SdkConfig",
+      "callbacks": [
+        "PlatformAppToAppBridge",
+        "PlatformBridge"
+      ]
+    },
+    "upload_imei_list": {
+      "options_model": "CloudUploadImeiListOptions",
+      "result_model": "UploadImeiListResult"
+    }
+  },
+  "doc_map": {
+    "apis": "DOCS_ROOT/apis/<api_key>.md",
+    "models": "DOCS_ROOT/models/<model_key>.md",
+    "languages": "DOCS_ROOT/languages/<language_key>.md",
+    "concepts": "DOCS_ROOT/concepts/<concept_key>.md"
+  }
+}

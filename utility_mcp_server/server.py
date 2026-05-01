@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -119,7 +120,31 @@ def build_app(settings: Settings | None = None):
     settings = settings or get_settings()
     _configure_logging(settings.log_level)
     mcp = _build_mcp(settings)
+    _warmup_vector_store(settings)
     return _wrap_session_not_found(mcp.streamable_http_app())
+
+
+def _warmup_vector_store(settings: Settings) -> None:
+    """Eager-load the persisted RAG store at startup.
+
+    Loading a saved ``embeddings.json`` is just a synchronous file read, so
+    paying that cost during process boot keeps the first user request fast.
+    Skipped when no saved store exists, since building from scratch would
+    issue Bedrock embedding calls and significantly delay startup.
+    """
+    if not settings.rag_embeddings_path.exists():
+        logger.info(
+            "Skipping vector store warmup — no saved store at %s",
+            settings.rag_embeddings_path,
+        )
+        return
+    try:
+        from .rag.store import get_vector_store
+
+        asyncio.run(get_vector_store(settings))
+        logger.info("Vector store warmup complete")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Vector store warmup failed: %s", exc)
 
 
 # Module-level ASGI app — used by uvicorn target ``utility_mcp_server.server:app``.

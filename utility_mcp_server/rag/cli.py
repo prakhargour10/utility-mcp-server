@@ -2,10 +2,9 @@
 
 Two entrypoints are exposed via ``pyproject.toml`` ``[project.scripts]``:
 
-* ``rag-rebuild`` — Run the full pipeline from scratch:
-  ingest raw markdown → chunk → embed via Bedrock Titan → save
-  ``embeddings.json``. Use this whenever the docs change or the
-  embedding model / dimensions change.
+* ``rag-rebuild`` — Chunk the markdown corpus under ``docs/``, embed each
+  chunk via Bedrock Titan, and save ``embeddings.json``. Use this whenever
+  the docs change or the embedding model / dimensions change.
 
 * ``rag-load`` — Load the existing ``embeddings.json`` into memory and
   report its size. Use this to verify that a prebuilt vector store is
@@ -18,7 +17,6 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
-import shutil
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -31,7 +29,6 @@ from .embed import (
     VectorStore,
     build_vector_store,
 )
-from .ingest import fetch_all_docs
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +37,7 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 def _embeddings_path(settings: Settings) -> Path:
-    return settings.rag_raw_docs_dir.parent / "embeddings.json"
+    return settings.rag_embeddings_path
 
 
 def _configure_logging(level: str) -> None:
@@ -58,19 +55,10 @@ def _build_rebuild_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rag-rebuild",
         description=(
-            "Rebuild the RAG vector database from scratch: ingest raw docs, "
-            "chunk, embed via Bedrock Titan, and persist to embeddings.json."
+            "Rebuild the RAG vector database from scratch: chunk the local "
+            "markdown corpus, embed via Bedrock Titan, and persist to "
+            "embeddings.json."
         ),
-    )
-    parser.add_argument(
-        "--skip-ingest",
-        action="store_true",
-        help="Reuse existing raw markdown on disk; do not re-fetch from the docs site.",
-    )
-    parser.add_argument(
-        "--keep-raw",
-        action="store_true",
-        help="Do not delete existing raw_docs before re-ingesting (default: wipe).",
     )
     parser.add_argument(
         "--chunk-size", type=int, default=1024,
@@ -100,48 +88,18 @@ def _build_rebuild_parser() -> argparse.ArgumentParser:
 
 async def _do_rebuild(args: argparse.Namespace) -> int:
     settings = get_settings()
-    raw_dir = settings.rag_raw_docs_dir
+    docs_dir = settings.rag_raw_docs_dir
     out_path = args.output or _embeddings_path(settings)
 
-    # 1. Wipe + re-ingest raw markdown (unless skipped)
-    if not args.skip_ingest:
-        if raw_dir.exists() and not args.keep_raw:
-            logger.info("Wiping existing raw_docs at %s", raw_dir)
-            shutil.rmtree(raw_dir)
-        raw_dir.mkdir(parents=True, exist_ok=True)
+    if not docs_dir.exists():
+        logger.error("Docs directory does not exist: %s", docs_dir)
+        return 2
 
-        routes = list(settings.rag_doc_routes)
-        if not routes:
-            logger.error(
-                "No routes configured. Set RAG_DOC_ROUTES or update config."
-            )
-            return 2
-        logger.info(
-            "Ingesting %d route(s) from %s", len(routes), settings.docs_base_url
-        )
-        report = await fetch_all_docs(
-            routes=routes,
-            base_url=settings.docs_base_url,
-            output_dir=raw_dir,
-            force=True,
-        )
-        if report.failures:
-            for f in report.failures:
-                logger.error("ingest failure: %s -> %s (%s)", f.route, f.url, f.error)
-            logger.error(
-                "%d ingest failure(s); aborting rebuild.", len(report.failures)
-            )
-            return 1
-        logger.info("Ingested %d document(s).", len(report.docs))
-    else:
-        logger.info("--skip-ingest set; reusing raw docs at %s", raw_dir)
-
-    # 2. Drop any stale embeddings file
     if out_path.exists():
         logger.info("Removing stale embeddings file %s", out_path)
         out_path.unlink()
 
-    # 3. Chunk + embed + build the in-memory store
+    logger.info("Building vector store from %s", docs_dir)
     store = await build_vector_store(
         settings,
         chunk_size=args.chunk_size,
@@ -150,7 +108,6 @@ async def _do_rebuild(args: argparse.Namespace) -> int:
         concurrency=args.concurrency,
     )
 
-    # 4. Persist
     store.save(out_path)
     logger.info("Saved %d embedded chunk(s) to %s", len(store), out_path)
     print(f"\nrag-rebuild OK: {len(store)} chunks -> {out_path}")
@@ -247,7 +204,6 @@ def load_main(argv: Sequence[str] | None = None) -> int:
 
 
 if __name__ == "__main__":  # pragma: no cover
-    # Allow `python -m utility_mcp_server.rag.cli rebuild|load ...`
     if len(sys.argv) < 2 or sys.argv[1] not in {"rebuild", "load"}:
         print("Usage: python -m utility_mcp_server.rag.cli {rebuild|load} [args...]")
         raise SystemExit(2)

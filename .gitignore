@@ -28,5 +28,7 @@ Thumbs.db
 .env.local
 .env.*.local
 
-# RAG pipeline artifacts (regenerated via the rag.ingest / rag.embed CLIs)
+# RAG pipeline artifacts (regenerated via the rag-rebuild CLI).
+# The markdown corpus lives under docs/ and is checked in; only the
+# generated embeddings.json + any scratch files under data/ are ignored.
 data/

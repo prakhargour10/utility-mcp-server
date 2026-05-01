@@ -175,7 +175,7 @@ def _register_rag(mcp: FastMCP, settings: Settings) -> None:
 
         if not store.items:
             return _text_response(
-                "RAG store is empty. Run the ingest + embed pipeline first."
+                "RAG store is empty. Run the rag-rebuild pipeline first."
             )
 
         # Fast path: enumeration intent → answer deterministically from

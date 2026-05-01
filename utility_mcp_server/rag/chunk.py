@@ -1,8 +1,8 @@
-"""Stage 2 of the RAG pipeline: chunk raw markdown docs into nodes.
+"""Chunk markdown docs into nodes (RAG pipeline stage 1).
 
-Reads every ``.md`` file under the raw-docs directory written by
-:mod:`utility_mcp_server.rag.ingest` and splits them into overlapping
-sentence-aware chunks using LlamaIndex's :class:`SentenceSplitter`.
+Reads every ``.md`` file under the docs directory configured by
+``settings.rag_raw_docs_dir`` (defaults to ``docs/``) and splits them into
+overlapping sentence-aware chunks using LlamaIndex's :class:`SentenceSplitter`.
 
 The output is a list of :class:`Chunk` objects, each carrying:
 
@@ -60,7 +60,7 @@ def _discover_markdown_files(root: Path) -> list[Path]:
 
 
 def _path_to_route(path: Path, root: Path) -> str:
-    """Convert ``data/raw_docs/api/init.md`` -> ``api/init``."""
+    """Convert ``docs/apis/init.md`` -> ``apis/init``."""
     rel = path.relative_to(root).with_suffix("")
     return rel.as_posix()
 
@@ -181,8 +181,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m utility_mcp_server.rag.chunk",
         description=(
-            "Chunk ingested raw markdown docs into sentence-aware nodes "
-            "(RAG pipeline stage 2)."
+            "Chunk the local markdown docs corpus into sentence-aware nodes "
+            "(RAG pipeline stage 1)."
         ),
     )
     parser.add_argument(
@@ -237,8 +237,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if not raw_dir.exists():
         logger.error(
-            "Raw-docs directory does not exist: %s\n"
-            "Run stage 1 first: python -m utility_mcp_server.rag.ingest",
+            "Docs directory does not exist: %s\n"
+            "Set RAG_RAW_DOCS_DIR or place markdown under the default docs/ folder.",
             raw_dir,
         )
         return 2

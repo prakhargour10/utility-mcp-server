@@ -52,14 +52,6 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
-    # Pine Labs documentation source (used by the RAG ingest stage)
-    docs_base_url: str = field(
-        default_factory=lambda: os.environ.get(
-            "PINELABS_DOCS_BASE_URL",
-            "https://portal.tms.uat.pinelabs.com/pinelabs-doc/docs",
-        ).rstrip("/")
-    )
-
     # SDK download artifacts (still served from local repo)
     sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "sdk")
     sdk_download_base_url: str = field(
@@ -84,38 +76,26 @@ class Settings:
     # ------------------------------------------------------------------
     # RAG (Retrieval-Augmented Generation)
     # ------------------------------------------------------------------
-    # Local directory where ingested raw markdown is written. Used as the
-    # source of truth for chunking + embedding.
+    # Local directory containing the markdown documentation corpus. This
+    # is the single source of truth for chunking + embedding -- docs are
+    # committed to the repo under ``docs/`` rather than fetched at build
+    # time.
     rag_raw_docs_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get(
                 "RAG_RAW_DOCS_DIR",
-                str(REPO_ROOT / "data" / "raw_docs"),
+                str(REPO_ROOT / "docs"),
             )
         )
     )
-    # Routes (relative to docs_base_url, without the .md suffix) that
-    # expose raw markdown content. Override with a comma-separated list.
-    rag_doc_routes: list[str] = field(
-        default_factory=lambda: _env_list(
-            "RAG_DOC_ROUTES",
-            [
-                "overview",
-                "concepts/lifecycle",
-                "concepts/transports",
-                "concepts/capabilities",
-                "concepts/eventid",
-                "concepts/error-handling",
-                "concepts/result-payload",
-                "concepts/versioning",
-                "languages/android",
-                "languages/ios",
-                "languages/python",
-                "languages/nodejs",
-                "languages/c",
-                "wire-formats/csv",
-                "wire-formats/pad-controller-frame",
-            ],
+    # Persisted vector store output. Kept under ``data/`` (which is
+    # gitignored) so embeddings rebuilds don't pollute the docs corpus.
+    rag_embeddings_path: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get(
+                "RAG_EMBEDDINGS_PATH",
+                str(REPO_ROOT / "data" / "embeddings.json"),
+            )
         )
     )
 
@@ -127,6 +107,12 @@ class Settings:
     )
     bedrock_model: str = field(
         default_factory=lambda: os.environ.get(
+            # Default to Opus because that's the inference profile id
+            # provisioned in this AWS account. Override via env to a
+            # Sonnet/Haiku id (e.g. anthropic.claude-3-5-sonnet-... or
+            # anthropic.claude-3-5-haiku-...) for lower latency once you
+            # confirm the id is enabled with `aws bedrock
+            # list-foundation-models` / `list-inference-profiles`.
             "BEDROCK_MODEL", "global.anthropic.claude-opus-4-6-v1"
         )
     )

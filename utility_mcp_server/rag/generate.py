@@ -22,6 +22,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
@@ -35,18 +37,36 @@ from .embed import (
     SearchHit,
     VectorStore,
     build_vector_store,
+    get_titan_embedder,
 )
 
 logger = logging.getLogger(__name__)
 
 
 DEFAULT_TOP_K = 4
-DEFAULT_MAX_TOKENS = 800
+# Grounded RAG answers over 4 chunks rarely need more than a few hundred
+# tokens. Bedrock generation latency scales roughly linearly with the
+# number of tokens actually produced, so keep this tight. Override per
+# call via the `max_tokens` argument if a user explicitly asks for a
+# long-form answer.
+DEFAULT_MAX_TOKENS = 1024
 DEFAULT_TEMPERATURE = 0.2
 DEFAULT_TIMEOUT = 60.0
 
+# Bounded answer cache. Identical (question, top_k) pairs return
+# instantly without hitting Bedrock at all. Capped to prevent unbounded
+# memory growth in long-running processes.
+_ANSWER_CACHE_MAX = 128
+_answer_cache: "OrderedDict[tuple[str, int], GenerationResult]" = OrderedDict()
+
+
+def clear_answer_cache() -> None:
+    """Drop all cached answers (used in tests and after reindex)."""
+    _answer_cache.clear()
+
+
 SYSTEM_PROMPT = (
-    "You are the official Pine Labs SDK documentation assistant.\n"
+    "You are the Pine Labs SDK documentation assistant.\n"
     "\n"
     "STRICT RULES — you MUST follow these:\n"
     "1. Answer ONLY using the CONTEXT chunks provided in the user message. "
@@ -188,6 +208,35 @@ def _extract_text(converse_response: dict) -> str:
     return "".join(chunks).strip()
 
 
+# Process-wide singleton Claude client. Reusing the underlying
+# httpx.AsyncClient keeps the TLS connection to Bedrock warm across
+# requests and avoids the handshake cost on every query.
+_claude_singleton: BedrockClaudeClient | None = None
+
+
+def get_claude_client(
+    *,
+    api_key: str,
+    region: str,
+    model: str,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> BedrockClaudeClient:
+    """Return a process-wide cached Claude Converse client."""
+    global _claude_singleton
+    if (
+        _claude_singleton is None
+        or _claude_singleton.model != model
+        or _claude_singleton._url.split("//", 1)[1].split(".", 2)[1] != region
+    ):
+        _claude_singleton = BedrockClaudeClient(
+            api_key=api_key,
+            region=region,
+            model=model,
+            timeout=timeout,
+        )
+    return _claude_singleton
+
+
 # ---------------------------------------------------------------------------
 # Prompt assembly
 # ---------------------------------------------------------------------------
@@ -235,42 +284,60 @@ async def answer_question(
     if not store.items:
         raise ValueError("VectorStore is empty — embed chunks first.")
 
+    # Cache hit: identical question + top_k returns the previous answer
+    # immediately without calling Bedrock at all.
+    cache_key = (question.strip(), int(top_k))
+    cached = _answer_cache.get(cache_key)
+    if cached is not None:
+        _answer_cache.move_to_end(cache_key)
+        logger.info("RAG cache hit for question=%r top_k=%d", cache_key[0][:80], top_k)
+        return cached
+
     settings = settings or get_settings()
     sample = store.items[0]
 
-    embedder = BedrockTitanEmbedder(
+    embedder = get_titan_embedder(
         api_key=settings.bedrock_api_key,
         region=settings.bedrock_region,
         model=sample.model,
         dimensions=sample.dimensions,
     )
-    try:
-        try:
-            qvec = await embedder.embed_one(question)
-        except BedrockEmbeddingError:
-            raise
-    finally:
-        await embedder.aclose()
+    t0 = time.perf_counter()
+    qvec = await embedder.embed_one(question)
+    t_embed = time.perf_counter() - t0
 
+    t0 = time.perf_counter()
     hits = store.search(qvec, top_k=top_k)
     prompt = build_grounded_prompt(question, hits)
+    t_search = time.perf_counter() - t0
 
-    claude = BedrockClaudeClient(
+    claude = get_claude_client(
         api_key=settings.bedrock_api_key,
         region=settings.bedrock_region,
         model=settings.bedrock_model,
     )
-    try:
-        response = await claude.converse(
-            system_prompt=SYSTEM_PROMPT,
-            user_message=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
-    finally:
-        await claude.aclose()
+    t0 = time.perf_counter()
+    response = await claude.converse(
+        system_prompt=SYSTEM_PROMPT,
+        user_message=prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+    )
+    t_gen = time.perf_counter() - t0
 
-    return GenerationResult(
+    usage = response.get("usage") or {}
+    logger.info(
+        "RAG timing: embed=%.0fms search=%.0fms generate=%.0fms "
+        "(in=%s out=%s tokens, model=%s)",
+        t_embed * 1000,
+        t_search * 1000,
+        t_gen * 1000,
+        usage.get("inputTokens"),
+        usage.get("outputTokens"),
+        claude.model,
+    )
+
+    result = GenerationResult(
         question=question,
         answer=_extract_text(response),
         sources=hits,
@@ -278,6 +345,12 @@ async def answer_question(
         stop_reason=response.get("stopReason"),
         usage=response.get("usage"),
     )
+
+    # Populate the cache and evict oldest entries if we're over capacity.
+    _answer_cache[cache_key] = result
+    while len(_answer_cache) > _ANSWER_CACHE_MAX:
+        _answer_cache.popitem(last=False)
+    return result
 
 
 # ---------------------------------------------------------------------------

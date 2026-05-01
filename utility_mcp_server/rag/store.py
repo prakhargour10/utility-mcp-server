@@ -3,7 +3,7 @@
 The store is expensive to build (it embeds every chunk via Bedrock Titan),
 so we lazy-load it once per process. If a saved store JSON exists at
 ``settings.rag_embeddings_path`` we load that; otherwise we build it from
-the raw docs on disk.
+the markdown corpus on disk.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ async def get_vector_store(
         return _store
 
     settings = settings or get_settings()
-    path = embeddings_path or (settings.rag_raw_docs_dir.parent / "embeddings.json")
+    path = embeddings_path or settings.rag_embeddings_path
 
     async with _lock:
         if _store is not None:
@@ -44,7 +44,7 @@ async def get_vector_store(
             _store = VectorStore.load(path)
         else:
             logger.info(
-                "No saved vector store at %s — building from raw docs.", path
+                "No saved vector store at %s — building from local docs.", path
             )
             _store = await build_vector_store(settings)
             try:

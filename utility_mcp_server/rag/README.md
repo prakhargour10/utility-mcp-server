@@ -7,13 +7,17 @@ This document is the "design rationale" for the code in this folder:
 
 ```
 utility_mcp_server/rag/
-├── ingest.py     # Stage 1 — pull raw markdown docs from the docs site
-├── chunk.py      # Stage 2 — split docs into Chunk[] (sentence-aware)
-├── embed.py      # Stage 3 — embed Chunks via Bedrock Titan v2 -> float[1024]
+├── chunk.py      # Stage 1 — split docs/**/*.md into Chunk[] (sentence-aware)
+├── embed.py      # Stage 2 — embed Chunks via Bedrock Titan v2 -> float[1024]
 │                 #           + tiny in-memory cosine VectorStore (persisted to JSON)
 ├── store.py      # Process-wide singleton that lazy-loads the VectorStore
-└── generate.py   # Stage 4 — retrieve top-k + answer with Bedrock Claude (Converse)
+└── generate.py   # Stage 3 — retrieve top-k + answer with Bedrock Claude (Converse)
 ```
+
+The markdown corpus that feeds the pipeline lives in the repo at
+``docs/`` (apis, models, languages, concepts) and is the single source of
+truth for chunking + embedding. ``docs/get_documentation_list.json`` is
+the master index served by the MCP tool layer.
 
 ---
 
@@ -35,19 +39,16 @@ The LLM stops being "an oracle" and becomes "a reading-comprehension engine over
 
 ---
 
-## 2. The 4-stage pipeline
+## 2. The 3-stage pipeline
 
 ```
                         ┌─────────────────────────────────────────────┐
                         │              OFFLINE / BUILD                │
                         ├─────────────────────────────────────────────┤
-   docs site URL ──►  1. INGEST   ──► data/raw_docs/**.md             │
+   docs/**/*.md   ──►  1. CHUNK   ──► Chunk[]                         │
                         │              │                               │
                         │              ▼                               │
-                        │  2. CHUNK   ──► Chunk[]                      │
-                        │              │                               │
-                        │              ▼                               │
-                        │  3. EMBED   ──► EmbeddedChunk[]              │
+                        │  2. EMBED   ──► EmbeddedChunk[]              │
                         │              │  (vector + text + metadata)   │
                         │              ▼                               │
                         │      data/embeddings.json (persisted store)  │
@@ -63,40 +64,33 @@ The LLM stops being "an oracle" and becomes "a reading-comprehension engine over
                                   build grounded prompt               │
                                             │                         │
                                             ▼                         │
-                                4. GENERATE  (Claude /converse)       │
+                                3. GENERATE  (Claude /converse)       │
                                             │                         │
                                             ▼                         │
                                  answer + cited sources               │
                         └─────────────────────────────────────────────┘
 ```
 
-Stages 1–3 are **build-time** (run once, persist). Stage 4 runs **per request**. Keeping that boundary clean is what makes a RAG system fast and cheap at query time.
+Stages 1–2 are **build-time** (run once, persist). Stage 3 runs **per request**. Keeping that boundary clean is what makes a RAG system fast and cheap at query time.
 
 ---
 
-## 3. Stage 1 — Ingest (`ingest.py`)
+## 3. Source corpus
 
-**Job:** get a clean local copy of the source documents.
+**Job:** keep an authoritative copy of the source documents next to the code.
 
-**What we do:** fetch every route in `settings.rag_doc_routes` from the Pine Labs docs site as raw `.md` and mirror the route layout into `data/raw_docs/`.
+The documentation lives directly in the repository under `docs/` and is committed to source control. There is no build-time fetch from a remote docs site — chunking and embedding always read from the local files.
 
-### Why a local mirror at all?
-- **Determinism.** Build runs are reproducible; the docs site can't change under us mid-run.
+### Why a local in-repo corpus?
+- **Determinism.** Build runs are reproducible; no remote site can change under us mid-run.
 - **Decoupling.** Chunking/embedding don't care where bytes came from.
-- **Diffability.** `git diff` on `data/raw_docs/` shows what changed in the docs.
-- **Offline rebuilds.** You can re-chunk/re-embed without hitting the network.
-
-### Alternatives we did *not* pick
-| Option | Why not |
-|---|---|
-| Scrape rendered HTML | HTML is noisy (nav, footers, JS). The site already serves clean `.md` per route — use it. |
-| Crawl the whole site recursively | Routes are known and small; explicit list = predictable corpus. |
-| Read straight from the live URL on every query | Adds latency, fragility, and rate-limit risk to every user request. |
-| Pull from the docs Git repo | We don't own it; HTTP is the published contract. |
+- **Diffability.** `git diff` on `docs/` shows exactly what changed.
+- **Offline rebuilds.** Re-chunk/re-embed without any network.
+- **Auditability.** Reviewers see the actual text being indexed in PRs.
 
 ---
 
-## 4. Stage 2 — Chunking (`chunk.py`)
+## 4. Stage 1 — Chunking (`chunk.py`)
 
 **Job:** split each markdown file into smaller, retrievable pieces (`Chunk` objects).
 
@@ -139,7 +133,7 @@ We use LlamaIndex's `SentenceSplitter` with `chunk_size=1024` tokens and `chunk_
 
 ---
 
-## 5. Stage 3 — Embeddings + Vector Store (`embed.py`)
+## 5. Stage 2 — Embeddings + Vector Store (`embed.py`)
 
 This is the stage you flagged. There are actually **two** decisions here:
 
@@ -220,7 +214,7 @@ This is ~30 lines of code. It exists because of one number: **N**, the number of
 
 ---
 
-## 6. Stage 4 — Retrieve + Generate (`generate.py`)
+## 6. Stage 3 — Retrieve + Generate (`generate.py`)
 
 **Job:** answer the user's question, grounded in retrieved chunks.
 
@@ -262,22 +256,19 @@ The single biggest risk in RAG is the model **ignoring the context** and answeri
 ## 7. Putting it together — end-to-end run
 
 ```bash
-# Stage 1: pull docs into data/raw_docs/
-python -m utility_mcp_server.rag.ingest
-
-# Stage 2 (optional sanity check): inspect chunking
+# Stage 1 (optional sanity check): inspect chunking
 python -m utility_mcp_server.rag.chunk --json /tmp/chunks.json
 
-# Stage 3: embed + persist the vector store
+# Stage 2: embed + persist the vector store
 python -m utility_mcp_server.rag.embed --save data/embeddings.json
 
-# Stage 4: ask a question
+# Stage 3: ask a question
 python -m utility_mcp_server.rag.generate \
     --load data/embeddings.json \
     --question "How do I initialize the Pine Labs SDK?"
 ```
 
-In production (the MCP server), Stage 4 runs per request and `store.py` keeps the loaded `VectorStore` in memory for the whole process.
+In production (the MCP server), Stage 3 runs per request and `store.py` keeps the loaded `VectorStore` in memory for the whole process.
 
 ---
 
@@ -285,7 +276,7 @@ In production (the MCP server), Stage 4 runs per request and `store.py` keeps th
 
 | Stage | Choice | Why this, not that |
 |---|---|---|
-| Ingest | Fetch published `.md` per route, mirror to disk | Deterministic, diffable, decouples network from build. |
+| Source | In-repo `docs/` markdown corpus, committed to git | Deterministic, diffable, decouples chunking from any network. |
 | Chunk | LlamaIndex `SentenceSplitter`, 1024 tokens / 128 overlap, ID = `route#index` | Sentence-aware > byte-slicing; overlap preserves boundary context; stable IDs power citations. |
 | Embed | Bedrock **Titan v2**, 1024-dim, normalized | Same vendor as the LLM (one auth, one bill); strong quality; normalization makes cosine = dot product. |
 | Vector store | **In-memory list + cosine**, persisted to `embeddings.json` | N is tiny → flat scan is microseconds. A vector DB would be ceremony, not value. JSON keeps it portable + auditable. Easy to swap later. |
@@ -297,4 +288,4 @@ In production (the MCP server), Stage 4 runs per request and `store.py` keeps th
 > **Build-time:** turn documents into *searchable meaning* (chunks → vectors → store).
 > **Query-time:** turn a question into the *same kind of vector*, find the closest chunks, and let an LLM read them out loud — with citations and a leash.
 
-Every "advanced" RAG technique you'll read about later (hybrid search, re-rankers, query rewriting, HyDE, multi-vector, graph RAG, agentic RAG) is an **upgrade to one of these four stages**. Once the boring baseline works, you can swap one stage at a time and measure whether it actually helps your corpus and your users.
+Every "advanced" RAG technique you'll read about later (hybrid search, re-rankers, query rewriting, HyDE, multi-vector, graph RAG, agentic RAG) is an **upgrade to one of these stages**. Once the boring baseline works, you can swap one stage at a time and measure whether it actually helps your corpus and your users.

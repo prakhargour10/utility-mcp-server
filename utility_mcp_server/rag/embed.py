@@ -1,4 +1,4 @@
-"""Stage 3 of the RAG pipeline: embed chunks via AWS Bedrock Titan.
+"""Embed chunks via AWS Bedrock Titan (RAG pipeline stage 2).
 
 Sends each :class:`Chunk` text through the Bedrock Titan embedding model
 (``amazon.titan-embed-text-v2:0`` by default) and returns dense float
@@ -38,6 +38,41 @@ logger = logging.getLogger(__name__)
 DEFAULT_EMBED_DIMENSIONS = 1024  # Titan v2 supports 256 / 512 / 1024
 DEFAULT_CONCURRENCY = 4
 DEFAULT_TIMEOUT = 30.0
+
+# Process-wide singleton embedder. Reusing the underlying httpx.AsyncClient
+# keeps the TLS connection to Bedrock warm across requests and avoids the
+# ~100–300 ms handshake cost on every query.
+_titan_singleton: "BedrockTitanEmbedder | None" = None
+
+
+def get_titan_embedder(
+    *,
+    api_key: str,
+    region: str,
+    model: str,
+    dimensions: int = DEFAULT_EMBED_DIMENSIONS,
+    timeout: float = DEFAULT_TIMEOUT,
+) -> "BedrockTitanEmbedder":
+    """Return a process-wide cached Titan embedder.
+
+    A new instance is created only if the (model, region, dimensions) tuple
+    changes, which should never happen at runtime.
+    """
+    global _titan_singleton
+    if (
+        _titan_singleton is None
+        or _titan_singleton.model != model
+        or _titan_singleton._region != region
+        or _titan_singleton.dimensions != dimensions
+    ):
+        _titan_singleton = BedrockTitanEmbedder(
+            api_key=api_key,
+            region=region,
+            model=model,
+            dimensions=dimensions,
+            timeout=timeout,
+        )
+    return _titan_singleton
 
 
 # ---------------------------------------------------------------------------
@@ -374,7 +409,7 @@ async def _amain(args) -> int:
         )
 
     if not store.items:
-        print("No chunks were embedded — did you run stage 1 (ingest) first?")
+        print("No chunks were embedded \u2014 is the docs directory populated?")
         return 1
 
     sample = store.items[0]

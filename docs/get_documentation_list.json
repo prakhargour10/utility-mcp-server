@@ -1,20 +1,82 @@
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "sdk": {
     "name": "Pine Billing SDK",
     "package_id": "pine-billing-sdk",
     "rust_crate": "pine-billing-ffi",
-    "native_library": "libpine_billing_sdk",
+    "native_library": "libuniffi_pine_billing",
     "uniffi_namespace": "pine_billing",
     "public_class": "PineBillingSdk",
-    "current_version": "0.1.0",
-    "supported_languages": [
-      "android",
-      "ios",
-      "python",
-      "nodejs",
-      "c"
+    "current_version": "0.5.0-preview.2",
+    "last_updated_for_sdk_version": "0.5.0-preview.2",
+    "supported_bindings": [
+      {
+        "key": "android",
+        "status": "shipping"
+      },
+      {
+        "key": "jvm",
+        "status": "shipping"
+      },
+      {
+        "key": "ios",
+        "status": "roadmap"
+      },
+      {
+        "key": "python",
+        "status": "roadmap"
+      },
+      {
+        "key": "nodejs",
+        "status": "roadmap"
+      },
+      {
+        "key": "c",
+        "status": "roadmap"
+      }
     ],
+    "supported_languages": [
+      "Kotlin (Android)",
+      "Java (Android)",
+      "Kotlin (JVM)",
+      "Java (JVM)",
+      "Swift",
+      "Objective-C",
+      "Python",
+      "TypeScript",
+      "JavaScript",
+      "C",
+      "C++"
+    ],
+    "language_aliases": {
+      "kotlin": "android",
+      "kotlin-android": "android",
+      "java-android": "android",
+      "android": "android",
+      "jvm": "jvm",
+      "kotlin-jvm": "jvm",
+      "java-jvm": "jvm",
+      "java": "jvm",
+      "swift": "ios",
+      "objective-c": "ios",
+      "objc": "ios",
+      "obj-c": "ios",
+      "ios": "ios",
+      "macos": "ios",
+      "python": "python",
+      "py": "python",
+      "nodejs": "nodejs",
+      "node": "nodejs",
+      "node.js": "nodejs",
+      "javascript": "nodejs",
+      "js": "nodejs",
+      "typescript": "nodejs",
+      "ts": "nodejs",
+      "c": "c",
+      "c++": "c",
+      "cpp": "c",
+      "cxx": "c"
+    },
     "supported_transports": [
       "AppToApp",
       "Tcp",
@@ -25,15 +87,24 @@
     ],
     "default_currency": "INR",
     "amount_unit": "paise (lowest currency unit, integer)",
-    "event_id_format": "UUIDv4 (SDK-allocated; merchants never create one)"
+    "event_id_format": "UUIDv4 (SDK-allocated; merchants never create one)",
+    "language_doc_files": [
+      "requirements",
+      "setup",
+      "integration",
+      "examples",
+      "errors",
+      "distribution"
+    ]
   },
   "mcp_setup": {
     "description": "Variables the client LLM SHOULD set on its session before generating SDK code or instructing the user.",
     "variables": {
       "DOCS_ROOT": "absolute path to this doc bundle on disk",
-      "TARGET_LANGUAGE": "one of android | ios | python | nodejs | c \u2014 ask the user if not known",
+      "TARGET_LANGUAGE": "user-stated language. MUST be resolved to a binding via sdk.language_aliases. Note the JVM/Android split: 'java' alone defaults to 'jvm'; 'java-android' or 'kotlin' resolve to 'android'.",
+      "TARGET_BINDING": "resolved binding key: one of android | jvm | ios | python | nodejs | c.",
       "TARGET_TRANSPORT": "one of AppToApp | Cloud | PadController | Tcp \u2014 ask the user; AppToApp is default on Android, Cloud is default for server-side merchants",
-      "SDK_VERSION": "exact version requested by the user; default to sdk.current_version",
+      "SDK_VERSION": "exact version requested by the user; default to sdk.current_version (0.5.0-preview.2)",
       "MERCHANT_ID": "supplied by Pinelabs onboarding; required on Cloud + on TransactionRequest for non-AppToApp transports",
       "TERMINAL_ID": "supplied by Pinelabs onboarding; required on TransactionRequest for non-AppToApp transports",
       "APPLICATION_ID": "Pinelabs-provisioned app identifier; required for AppToApp",
@@ -43,11 +114,11 @@
     },
     "workflow": [
       "1. Always call get_documentation_list FIRST and cache the response for the session.",
-      "2. Resolve TARGET_LANGUAGE and TARGET_TRANSPORT (ask the user if missing).",
-      "3. Fetch language doc:  get_documentation(category='language', key=TARGET_LANGUAGE).",
-      "4. Fetch concepts you need:  get_documentation(category='concept', key='lifecycle' | 'transports' | 'error-handling' | \u2026).",
+      "2. Resolve TARGET_LANGUAGE \u2192 TARGET_BINDING via sdk.language_aliases. If the binding's status is 'roadmap', tell the user it is NOT shipping in this release before emitting any code.",
+      "3. Fetch the six per-binding files: get_documentation(category='language', key=`${TARGET_BINDING}/requirements`), then setup, integration, examples, errors, distribution.",
+      "4. Fetch concepts you need:  get_documentation(category='concept', key='lifecycle' | 'transports' | 'capabilities' | 'error-handling' | 'threading' | 'distribution' | \u2026).",
       "5. For every UDL symbol you intend to emit in code, fetch its model or api doc by key BEFORE writing the code. Do not hallucinate fields.",
-      "6. Use get_sdk(artifact_key=\u2026) to give the user a real download URL/coordinate; never invent one.",
+      "6. Use get_sdk(artifact_key=\u2026) to give the user a real download URL/coordinate; never invent one. Today only android-aar and jvm-jar have shipping artifacts.",
       "7. Re-fetch on every new conversation \u2014 docs evolve with SDK_VERSION."
     ],
     "rules_for_generated_code": [
@@ -58,6 +129,7 @@
       "transport_options variant MUST match the active transport; mismatch raises InvalidInput.",
       "On Cloud, transport_options is REQUIRED on do_transaction; cancel/check_status options are REQUIRED.",
       "Listener callbacks fire on an SDK-internal thread. Generated UI code MUST marshal to the platform UI thread before touching widgets.",
+      "On Android, every blocking PineBillingSdk method throws IllegalStateException if invoked on the main thread \u2014 dispatch from a background executor or coroutine.",
       "Never log card data, PIN, CVV, full PAN, tokens, or keys. masked_pan only at debug.",
       "Only one operation per SDK instance at a time \u2014 disable the trigger control on on_started, re-enable on on_success / on_failure."
     ]
@@ -72,9 +144,9 @@
       "purpose": "Fetch a single detailed doc file.",
       "args": {
         "category": "one of: api | model | language | concept",
-        "key": "value from the matching key registry below"
+        "key": "value from the matching key registry below. For 'language', use '<binding>/<file>' e.g. 'android/setup'."
       },
-      "returns": "Markdown body of DOCS_ROOT/<category>s/<key>.md (note: 'api'\u2192apis/, 'model'\u2192models/, 'language'\u2192languages/, 'concept'\u2192concepts/).",
+      "returns": "Markdown body of DOCS_ROOT/<category>s/<key>.md.",
       "examples": [
         {
           "category": "api",
@@ -86,7 +158,11 @@
         },
         {
           "category": "language",
-          "key": "android"
+          "key": "android/setup"
+        },
+        {
+          "category": "language",
+          "key": "jvm/examples"
         },
         {
           "category": "concept",
@@ -98,7 +174,7 @@
       "purpose": "Resolve a downloadable SDK artifact for a given target.",
       "args": {
         "artifact_key": "value from artifact_keys below",
-        "version": "optional; defaults to sdk.current_version"
+        "version": "optional; defaults to sdk.current_version (0.5.0-preview.2)"
       },
       "returns": "{ url, sha256, size_bytes, license, install_hint }"
     }
@@ -317,38 +393,168 @@
     "language_keys": [
       {
         "key": "android",
-        "binding": "Kotlin",
-        "package_manager": "Maven/Gradle",
+        "status": "shipping",
+        "binding": "Kotlin (primary) + Java interop, packaged as AAR",
+        "languages": [
+          "Kotlin",
+          "Java"
+        ],
+        "aliases": [
+          "kotlin",
+          "kotlin-android",
+          "java-android",
+          "android"
+        ],
+        "package_manager": "Direct file drop (Gradle local file)",
         "artifact": "pine-billing-sdk-<ver>.aar",
-        "namespace": "com.pinelabs.billing.sdk"
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a"
+        ],
+        "min_sdk": 21,
+        "namespace": "com.pinelabs.billing.sdk (fa\u00e7ade) + uniffi.pine_billing (UDL-projected models)",
+        "doc_files": [
+          "android/requirements",
+          "android/setup",
+          "android/integration",
+          "android/examples",
+          "android/errors",
+          "android/distribution"
+        ],
+        "notes": "JNA is NOT required \u2014 the AAR loads its native lib via System.loadLibrary directly."
+      },
+      {
+        "key": "jvm",
+        "status": "shipping",
+        "binding": "Kotlin / Java on a desktop or server JVM, packaged as a fat JAR",
+        "languages": [
+          "Kotlin",
+          "Java"
+        ],
+        "aliases": [
+          "jvm",
+          "kotlin-jvm",
+          "java-jvm",
+          "java"
+        ],
+        "package_manager": "Direct file drop (Maven/Gradle local file)",
+        "artifact": "pine-billing-sdk-<ver>.jar",
+        "namespace": "uniffi.pine_billing",
+        "doc_files": [
+          "jvm/requirements",
+          "jvm/setup",
+          "jvm/integration",
+          "jvm/examples",
+          "jvm/errors",
+          "jvm/distribution"
+        ],
+        "notes": "JNA 5.14+ IS required at runtime. JAR is launched via `java -cp` only; there is no Main-Class manifest. Java callers must use a Kotlin helper for UInt/ULong fields."
       },
       {
         "key": "ios",
+        "status": "roadmap",
         "binding": "Swift",
-        "package_manager": "SwiftPM, CocoaPods",
-        "artifact": "PineBillingSdk.xcframework",
-        "module": "PineBillingSdk"
+        "languages": [
+          "Swift",
+          "Objective-C"
+        ],
+        "aliases": [
+          "swift",
+          "objective-c",
+          "objc",
+          "obj-c",
+          "ios",
+          "macos"
+        ],
+        "package_manager": "SwiftPM, CocoaPods (planned)",
+        "artifact": "PineBillingSdk.xcframework (planned)",
+        "module": "PineBillingSdk",
+        "doc_files": [
+          "ios/requirements",
+          "ios/setup",
+          "ios/integration",
+          "ios/examples",
+          "ios/errors",
+          "ios/distribution"
+        ]
       },
       {
         "key": "python",
+        "status": "roadmap",
         "binding": "Python",
-        "package_manager": "pip",
-        "artifact": "pine_billing_sdk-<ver>-*.whl",
-        "module": "pine_billing"
+        "languages": [
+          "Python"
+        ],
+        "aliases": [
+          "python",
+          "py"
+        ],
+        "package_manager": "pip (planned)",
+        "artifact": "pine_billing_sdk-<ver>-*.whl (planned)",
+        "module": "pine_billing",
+        "doc_files": [
+          "python/requirements",
+          "python/setup",
+          "python/integration",
+          "python/examples",
+          "python/errors",
+          "python/distribution"
+        ]
       },
       {
         "key": "nodejs",
-        "binding": "Node.js",
-        "package_manager": "npm",
-        "artifact": "@pinelabs/pine-billing-sdk",
-        "module": "@pinelabs/pine-billing-sdk"
+        "status": "roadmap",
+        "binding": "Node.js (N-API)",
+        "languages": [
+          "TypeScript",
+          "JavaScript"
+        ],
+        "aliases": [
+          "nodejs",
+          "node",
+          "node.js",
+          "javascript",
+          "js",
+          "typescript",
+          "ts"
+        ],
+        "package_manager": "npm (planned)",
+        "artifact": "@pinelabs/pine-billing-sdk (planned)",
+        "module": "@pinelabs/pine-billing-sdk",
+        "doc_files": [
+          "nodejs/requirements",
+          "nodejs/setup",
+          "nodejs/integration",
+          "nodejs/examples",
+          "nodejs/errors",
+          "nodejs/distribution"
+        ]
       },
       {
         "key": "c",
-        "binding": "C",
-        "package_manager": "tar/zip",
-        "artifact": "pine_billing_sdk-<ver>-<triple>.tgz",
-        "header": "pine_billing.h"
+        "status": "roadmap",
+        "binding": "C ABI (UniFFI scaffolding)",
+        "languages": [
+          "C",
+          "C++"
+        ],
+        "aliases": [
+          "c",
+          "c++",
+          "cpp",
+          "cxx"
+        ],
+        "package_manager": "tar/zip (planned)",
+        "artifact": "pine_billing_sdk-<ver>-<triple>.tgz (planned)",
+        "header": "pine_billing.h",
+        "doc_files": [
+          "c/requirements",
+          "c/setup",
+          "c/integration",
+          "c/examples",
+          "c/errors",
+          "c/distribution"
+        ]
       }
     ],
     "concept_keys": [
@@ -359,66 +565,93 @@
       "error-handling",
       "result-payload",
       "eventid-and-reconciliation",
-      "versioning-and-support"
+      "versioning-and-support",
+      "distribution",
+      "threading"
     ],
     "artifact_keys": [
       {
         "key": "android-aar",
+        "status": "shipping",
         "platform": "Android",
-        "format": "AAR"
+        "format": "AAR",
+        "abis": [
+          "arm64-v8a",
+          "armeabi-v7a"
+        ],
+        "min_sdk": 21,
+        "filename": "pine-billing-sdk-0.5.0-preview.2.aar"
+      },
+      {
+        "key": "jvm-jar",
+        "status": "shipping",
+        "platform": "JVM (Linux/macOS/Windows)",
+        "format": "JAR with bundled native libs under META-INF/jniLibs/",
+        "filename": "pine-billing-sdk-0.5.0-preview.2.jar"
       },
       {
         "key": "ios-xcframework",
+        "status": "roadmap",
         "platform": "iOS",
         "format": "XCFramework"
       },
       {
         "key": "python-wheel-manylinux-x86_64",
+        "status": "roadmap",
         "platform": "Linux",
         "format": "wheel"
       },
       {
         "key": "python-wheel-manylinux-aarch64",
+        "status": "roadmap",
         "platform": "Linux",
         "format": "wheel"
       },
       {
         "key": "python-wheel-macos-x86_64",
+        "status": "roadmap",
         "platform": "macOS",
         "format": "wheel"
       },
       {
         "key": "python-wheel-macos-arm64",
+        "status": "roadmap",
         "platform": "macOS",
         "format": "wheel"
       },
       {
         "key": "python-wheel-windows-x86_64",
+        "status": "roadmap",
         "platform": "Windows",
         "format": "wheel"
       },
       {
         "key": "nodejs-npm",
+        "status": "roadmap",
         "platform": "any",
         "format": "npm tarball with prebuilt binaries"
       },
       {
         "key": "c-linux-x86_64",
+        "status": "roadmap",
         "platform": "Linux",
         "format": "header + .so"
       },
       {
         "key": "c-linux-aarch64",
+        "status": "roadmap",
         "platform": "Linux",
         "format": "header + .so"
       },
       {
         "key": "c-macos-universal",
+        "status": "roadmap",
         "platform": "macOS",
         "format": "header + .dylib (universal2)"
       },
       {
         "key": "c-windows-x86_64",
+        "status": "roadmap",
         "platform": "Windows",
         "format": "header + .dll + .lib"
       }
@@ -438,7 +671,8 @@
         "lifecycle",
         "eventid-and-reconciliation",
         "error-handling",
-        "transports"
+        "transports",
+        "threading"
       ]
     },
     "cancel": {
@@ -465,7 +699,8 @@
       "callbacks": [
         "PlatformAppToAppBridge",
         "PlatformBridge"
-      ]
+      ],
+      "android_facade_signature": "PineBillingSdk(Context, SdkConfig, PlatformBridge? = null)"
     },
     "upload_imei_list": {
       "options_model": "CloudUploadImeiListOptions",
@@ -475,7 +710,7 @@
   "doc_map": {
     "apis": "DOCS_ROOT/apis/<api_key>.md",
     "models": "DOCS_ROOT/models/<model_key>.md",
-    "languages": "DOCS_ROOT/languages/<language_key>.md",
+    "languages": "DOCS_ROOT/languages/<binding>/<file>.md",
     "concepts": "DOCS_ROOT/concepts/<concept_key>.md"
   }
 }

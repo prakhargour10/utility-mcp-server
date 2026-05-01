@@ -4,21 +4,17 @@
 
 ## Purpose
 
-Cloud transport sub-mode. Single variant in v1.
+Cloud transport sub-mode. Single variant for v1; additional variants will be added in future minor releases.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
-| `Ism` | Default and only value in v1. |
+| `Ism` | Pinelabs ISM cloud endpoint. |
 
 ## MUST
 
-- Always set to Ism in v1.
-
-## MUST NOT
-
-- Do not exhaustively switch without a default arm — variants will be added.
+- Generated `when` / `switch` matches MUST include a default arm — this is an open enum.
 
 ## Cross-references
 

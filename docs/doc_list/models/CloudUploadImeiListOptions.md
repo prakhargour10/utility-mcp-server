@@ -4,29 +4,21 @@
 
 ## Purpose
 
-Inputs to upload_imei_list.
+Cloud admin call: register / refresh the IMEI list known to the upstream for a store. Routed through `upload_imei_list`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `merchant_id` | `string` | yes |  |
-| `security_token` | `string` | yes |  |
-| `store_id` | `string` | yes |  |
-| `hardware_id` | `string?` | no |  |
-| `imei_list` | `sequence<CloudImeiListItem>` | yes |  |
-
-## MUST
-
-- Only call when active transport is Cloud.
-
-## MUST NOT
-
-- Do not log security_token or imei values.
+| `merchant_id` | `string` | yes | |
+| `security_token` | `string` | yes | Never log. |
+| `store_id` | `string` | yes | |
+| `hardware_id` | `string?` | no | |
+| `imei_list` | `sequence<CloudImeiListItem>` | yes | |
 
 ## Cross-references
 
-`upload_imei_list`, `CloudImeiListItem`, `UploadImeiListResult`
+`CloudImeiListItem`, `UploadImeiListResult`, `apis/upload_imei_list`
 
 ## Per-language naming
 

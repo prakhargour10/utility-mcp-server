@@ -1,30 +1,22 @@
-# Model: `TransportOptions` (sealed)
+# Model: `TransportOptions` (sealed / [Enum] interface)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-Per-call extras for do_transaction. Variant MUST match active transport.
+Per-call transport-specific extras for `do_transaction`. The merchant supplies the variant matching the **active** transport. Mismatched variant raises `SdkError.InvalidInput` synchronously.
 
 ## Variants
 
 | Name | Signature | Notes |
 |---|---|---|
-| `AppToApp` | `AppToApp(AppToAppTransactionOptions)` | NCMC + GST extras. |
-| `Cloud` | `Cloud(CloudTransactionOptions)` | REQUIRED on Cloud. |
-| `PadController` | `PadController(PadControllerTransactionOptions)` | Loose key/value extras for now. |
-
-## MUST
-
-- Pick the variant matching the active transport at call time.
-
-## MUST NOT
-
-- Do not pass Cloud variant on AppToApp etc. — InvalidInput synchronously.
+| `AppToApp` | `AppToApp(AppToAppTransactionOptions options)` | Optional NCMC / GST fields. |
+| `Cloud` | `Cloud(CloudTransactionOptions options)` | **REQUIRED** on Cloud `do_transaction`. |
+| `PadController` | `PadController(PadControllerTransactionOptions options)` | Loose key/value extras. |
 
 ## Cross-references
 
-`TransactionRequest`, `AppToAppTransactionOptions`, `CloudTransactionOptions`, `PadControllerTransactionOptions`
+`AppToAppTransactionOptions`, `CloudTransactionOptions`, `PadControllerTransactionOptions`, `TransactionRequest`
 
 ## Per-language naming
 

@@ -1,8 +1,6 @@
 # API: `ping`
 
-> **AI INSTRUCTIONS:** This file describes the public method `ping` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `ping` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
@@ -12,16 +10,11 @@ ping()
 
 ## Purpose
 
-Liveness check on the connected terminal.
-
-## Parameters
-
-_None._
-
+Liveness check. Returns successfully if the terminal responded within the configured timeout.
 
 ## Returns
 
-void on success.
+`void`.
 
 ## Delivery model
 
@@ -29,18 +22,15 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport (AppToApp, Cloud).
-- **`SdkError.NotConnected`** — No link.
-- **`SdkError.Timeout`** — No reply within configured timeout.
-- **`SdkError.TransportError`** — Mid-stream link failure.
+- **`SdkError.NotSupported`** — All v1 transports raise this.
 
 ## MUST
 
-_(no positive obligations beyond the signature)_
+- Skip in v1 — every transport raises NotSupported.
 
 ## MUST NOT
 
-_(no anti-patterns specific to this API)_
+- Do not call from the Android main thread — the façade throws.
 
 ## Transport support matrix
 
@@ -67,10 +57,6 @@ sdk.ping();
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
 sdk.ping()
 ```
@@ -86,7 +72,7 @@ sdk.ping();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-try sdk.ping()
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -94,7 +80,7 @@ try sdk.ping()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-sdk.ping()
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -102,7 +88,7 @@ sdk.ping()
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-sdk.ping();
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -110,18 +96,15 @@ sdk.ping();
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_ping(sdk, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `SdkError`
-- Concepts: `capabilities`
+- Concepts: `capabilities`, `error-handling`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

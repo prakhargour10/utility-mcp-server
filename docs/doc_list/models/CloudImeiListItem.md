@@ -4,22 +4,14 @@
 
 ## Purpose
 
-One entry in CloudUploadImeiListOptions.imei_list.
+A single IMEI entry inside `CloudUploadImeiListOptions.imei_list`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `imei` | `string` | yes |  |
-| `status` | `i32` | yes | Upstream-defined enrollment code. |
-
-## MUST
-
-_(no positive obligations)_
-
-## MUST NOT
-
-_(no anti-patterns)_
+| `imei` | `string` | yes | |
+| `status` | `i32` | yes | Opaque status code understood by the upstream. |
 
 ## Cross-references
 

@@ -4,26 +4,22 @@
 
 ## Purpose
 
-Identity / wire config for the AppToApp transport (MasterApp Messenger).
+Identity / wire config for the AppToApp transport. Required when `SdkConfig.transport == AppToApp`. `application_id` lives on `SdkConfig` (top-level), NOT here.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `user_id` | `string` | yes | Maps to MasterApp Header.UserId. |
-| `version` | `string` | yes | Maps to Header.VersionNo. In production MUST equal "1.0" (AppConstants.MASTERAPP_API_VERSION). Other values are rejected by MasterService. |
+| `user_id` | `string` | yes | Calling user id. Maps to upstream `Header.UserId`. |
+| `version` | `string` | yes | Calling app version. Maps to upstream `Header.VersionNo`. In production this MUST equal `"1.0"`; other values are rejected by the upstream service. |
 
 ## MUST
 
-- Set version = "1.0" in production.
-
-## MUST NOT
-
-- Do not put application_id here — it lives on SdkConfig.
+- In production, `version` MUST be `"1.0"`.
 
 ## Cross-references
 
-`SdkConfig`, `PlatformAppToAppBridge`
+`SdkConfig`, `TransportType`
 
 ## Per-language naming
 

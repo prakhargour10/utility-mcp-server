@@ -6,25 +6,17 @@
 
 Terminal-state outcome of a transaction.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
-| `Success` | Terminal accepted and settled. |
-| `Failed` | Terminal/transport reported failure. |
-| `Pending` | Cloud-only: upload acknowledged but not yet settled. Drive next state via check_status. |
-
-## MUST
-
-- Treat Pending as not-yet-final on Cloud.
-
-## MUST NOT
-
-- Do not assume Pending will eventually become Success.
+| `Success` | Terminal acknowledged success. |
+| `Failed` | Terminal returned non-success. |
+| `Pending` | **Cloud only.** `do_transaction` returns once upload is acknowledged; merchant drives subsequent state via `check_status`. |
 
 ## Cross-references
 
-`TransactionResult`, `check_status`
+`TransactionResult`, `apis/check_status`, `OperationState`
 
 ## Per-language naming
 

@@ -4,30 +4,22 @@
 
 ## Purpose
 
-Transport channel used to talk to the terminal.
+The transport channel used to talk to the terminal.
 
-## Values
+## Variants
 
-| Value | Notes |
+| Name | Notes |
 |---|---|
-| `AppToApp` | Android-only Messenger IPC into Pinelabs MasterApp. |
-| `Tcp` | Placeholder in v1 — set_transport may raise NotSupported. |
-| `Bluetooth` | Routes through PADController. |
-| `Usb` | Routes through PADController. |
-| `Serial` | Routes through PADController. |
-| `Cloud` | HTTPS REST to the Pinelabs upstream. |
-
-## MUST
-
-- Provide the matching sub-config in SdkConfig before set_transport(kind).
-
-## MUST NOT
-
-- Do not change transport mid-transaction.
+| `AppToApp` | Android-only; binds upstream PoS service per call. |
+| `Tcp` | Placeholder in v1 — every method raises `NotSupported`. |
+| `Bluetooth` | Routed through the PADController gateway in v1. |
+| `Usb` | Routed through the PADController gateway in v1. |
+| `Serial` | Routed through the PADController gateway in v1. |
+| `Cloud` | HTTPS REST. |
 
 ## Cross-references
 
-`SdkConfig`, `set_transport`, `transports`
+`SdkConfig`, `concepts/capabilities`, `concepts/transports`
 
 ## Per-language naming
 

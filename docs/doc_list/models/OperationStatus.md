@@ -4,29 +4,21 @@
 
 ## Purpose
 
-Result of check_status. Field presence depends on state.
+Result of `check_status`. Field presence depends on `state`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `state` | `OperationState` | yes | Drives presence of other fields. |
-| `result` | `TransactionResult?` | - | Set iff state == Completed. |
-| `failure_detail` | `string?` | - | Set iff state == Failed. |
-| `terminal_response_code` | `string?` | - | Optional alongside failure_detail. |
-| `cloud_transaction_data` | `CloudTransactionData?` | - | Cloud-only. Populated by GetCloudBasedTxnStatus once settled. |
-
-## MUST
-
-- Switch on state before reading other fields.
-
-## MUST NOT
-
-- Do not assume result is non-null when state != Completed.
+| `state` | `OperationState` | yes | |
+| `result` | `TransactionResult?` | conditional | Set iff `state == Completed`. |
+| `failure_detail` | `string?` | conditional | Set iff `state == Failed`. |
+| `terminal_response_code` | `string?` | conditional | May be set iff `state == Failed`. |
+| `cloud_transaction_data` | `CloudTransactionData?` | conditional | Cloud-only. Always null for non-Cloud transports. |
 
 ## Cross-references
 
-`OperationState`, `TransactionResult`, `CloudTransactionData`, `check_status`
+`OperationState`, `TransactionResult`, `CloudTransactionData`, `apis/check_status`
 
 ## Per-language naming
 

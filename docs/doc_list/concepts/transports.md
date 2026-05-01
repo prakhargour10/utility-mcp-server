@@ -6,7 +6,7 @@
 
 | TransportType | Where it works | Wire | Discovery? | Cancel? | Diagnostics? |
 |---|---|---|---|---|---|
-| `AppToApp` | Android only | Pinelabs MasterApp Messenger IPC | no | no (v1) | no |
+| `AppToApp` | Android only | upstream PoS Messenger IPC | no | no (v1) | no |
 | `Cloud` | any host | HTTPS REST | no | yes (req. options) | no |
 | `PadController` | any host with a PADController gateway daemon listening on TCP loopback (default `127.0.0.1:8082`) | TCP-loopback to gateway | ✗ in v1 | ✗ in v1 | ✗ in v1 |
 | `Tcp` | placeholder in v1 | TBD | ✗ | ✗ | ✗ |
@@ -17,8 +17,7 @@
 - **Server-side merchant (any host, any language):** `Cloud`.
 - **Host with a PADController gateway daemon attached to a terminal:**
   `PadController`. The host can be Android, Linux, macOS, or Windows —
-  what matters is that the daemon is listening locally; the SDK speaks
-  TCP loopback to it.
+  what matters is that the daemon is listening locally.
 - **`Tcp`:** do not use in v1. `set_transport(Tcp)` may raise
   `NotSupported`.
 
@@ -38,9 +37,9 @@ construction time, even if `kind` is not the initial transport.
 
 ## Capability matrix (authoritative)
 
-See `capabilities` for the full table — the v1 PADController matrix
+See `capabilities.md` for the full table — the v1 PADController matrix
 is much narrower than the protocol family suggests.
 
 ## Next docs
 
-`capabilities`, `error-handling`, `distribution`, `threading`.
+`capabilities`, `error-handling`, `oem-terminal-registry`, `threading`.

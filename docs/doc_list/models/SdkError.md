@@ -1,10 +1,10 @@
-# Model: `SdkError` (error)
+# Model: `SdkError` (error / sealed)
 
 > **AI INSTRUCTIONS:** This file is the spec for the type. Use the exact field names, types, and constraints below. Do NOT add or omit fields.
 
 ## Purpose
 
-All SDK failures surface as a variant of SdkError.
+All SDK failures surface as a variant of `SdkError`. In Kotlin/Java, this is projected as the `SdkException` sealed hierarchy under `uniffi.pine_billing`.
 
 ## Variants
 
@@ -27,17 +27,19 @@ All SDK failures surface as a variant of SdkError.
 
 ## MUST
 
-- Map each variant to a distinct merchant-facing recovery path.
+- Map each variant to a distinct merchant-facing recovery path (see `concepts/error-handling`).
 - Log only `detail` and codes — never raw card data.
+- For `Timeout` / `TransportError` / `ReadTimeout` after `on_started` fired, call `check_status` (Cloud only) before declaring the transaction failed.
 
 ## MUST NOT
 
 - Do not parse `detail` for control flow — it is human diagnostic only.
-- Do not parse NotSupported.detail programmatically — wording varies by language binding.
+- Do not parse `NotSupported.detail` programmatically — wording varies by language binding.
+- Do not catch `Internal` and silently swallow.
 
 ## Cross-references
 
-`error-handling`
+`concepts/error-handling`, all api docs.
 
 ## Per-language naming
 

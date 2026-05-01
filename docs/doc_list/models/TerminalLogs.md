@@ -4,25 +4,21 @@
 
 ## Purpose
 
-Snapshot of terminal-side log lines.
+Snapshot of terminal-side logs returned by `get_logs`.
 
 ## Fields
 
 | Name | Type | Required | Notes |
 |---|---|---|---|
-| `lines` | `sequence<string>` | yes | Raw lines as the terminal reported them. SDK does not parse / redact / sort. |
+| `lines` | `sequence<string>` | yes | Raw lines as the terminal reported them. The SDK does not parse, redact, or sort. |
 
 ## MUST
 
-_(no positive obligations)_
-
-## MUST NOT
-
-- Do not assume content schema.
+- Treat lines as opaque diagnostic strings; never log to a destination that is not your secure log sink.
 
 ## Cross-references
 
-`get_logs`
+`apis/get_logs`
 
 ## Per-language naming
 

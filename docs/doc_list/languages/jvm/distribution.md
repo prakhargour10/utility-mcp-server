@@ -1,51 +1,20 @@
-# Language: JVM — Distribution
+# JVM — Distribution (Pine Billing SDK 0.5.0-preview.2)
 
-> **AI INSTRUCTIONS:** The JAR is delivered by direct file drop. Do NOT generate `mavenCentral()` snippets in this release.
+You receive `jvm-0.5.0-preview.2.zip` from your Pinelabs onboarding contact. The wrapper-zip layout is described in `setup.md` § 1.
 
-## Where to obtain the JAR
+The SDK is NOT published to Maven Central or any public registry. Verify the bindings JAR's SHA-256 against `METADATA.json` before installing.
 
-Pinelabs ships the artifact directly. Filename:
+## What's bundled
 
-```
-pine-billing-sdk-0.5.0-preview.2.jar
-```
+- Bindings JAR (`pine-billing-sdk-0.5.0-preview.2.jar`).
+- Native libs for Linux x86_64, macOS arm64/x86_64, Windows x86_64.
+- README, CHANGELOG, LICENSE, METADATA, THIRD_PARTY_NOTICES.
 
-There is **no** publicly reachable Maven coordinate yet.
+## What's NOT bundled
 
-## License
+- `net.java.dev.jna:jna:5.14.0` (declare it).
+- `gson` (declare only if you wire MasterApp adapter on JVM).
 
-Proprietary — Pinelabs internal-use license. Do not redistribute.
-The JAR's `META-INF/LICENSES/` directory lists transitive native-side
-permissive licenses.
+## Upgrades
 
-## Verifying the artifact
-
-```bash
-sha256sum lib/pine-billing-sdk-0.5.0-preview.2.jar
-# Compare against the value Pinelabs published.
-```
-
-## Version pinning
-
-* Pin to **the exact version** (`0.5.0-preview.2`).
-* Pre-1.0 minor bumps may break source compatibility.
-* Do NOT use floating constraints.
-
-## What is bundled inside the JAR
-
-* `uniffi/pine_billing/*.class` — Kotlin/Java surface.
-* `META-INF/jniLibs/<triple>/libuniffi_pine_billing.{so,dylib,dll}` —
-  native libraries for each shipping triple. JNA extracts the
-  matching one to a temp directory at runtime.
-* `META-INF/LICENSES/` — license bundle.
-
-## Roadmap
-
-| Channel | Coordinate (planned) | Status |
-|---|---|---|
-| Maven Central | `com.pinelabs:pine-billing-sdk:<ver>` | Not in `0.5.0-preview.2`. ETA TBD. |
-
-## Next docs
-
-`concepts/distribution`, `concepts/versioning-and-support`,
-`jvm/setup`.
+Replace the JAR + native libs in lockstep. Pre-1.0 minor bumps may include breaking API changes — read `CHANGELOG.md` first.

@@ -1,29 +1,20 @@
 # API: `upload_imei_list`
 
-> **AI INSTRUCTIONS:** This file describes the public method `upload_imei_list` on
-> `PineBillingSdk`. Read it before emitting any code that calls this
-> method. Validation rules and error semantics are normative.
+> **AI INSTRUCTIONS:** This file describes the public method `upload_imei_list` on `PineBillingSdk`. Read it before emitting any code that calls this method. Validation rules and error semantics are normative.
 
 ## Signature (UDL canonical)
 
 ```
-upload_imei_list(CloudUploadImeiListOptions options) -> UploadImeiListResult
+UploadImeiListResult upload_imei_list(CloudUploadImeiListOptions options)
 ```
 
 ## Purpose
 
-Cloud-only admin call: register / refresh the IMEI list known to the upstream for a store.
-
-## Parameters
-
-| Name | Type | Required | Notes |
-|---|---|---|---|
-| `options` | `CloudUploadImeiListOptions` | yes | merchant_id, security_token, store_id, optional hardware_id, sequence<CloudImeiListItem>. |
-
+Cloud admin: register / refresh the IMEI list known to the upstream for a store.
 
 ## Returns
 
-UploadImeiListResult{response_code,response_message?}.
+`UploadImeiListResult`.
 
 ## Delivery model
 
@@ -31,17 +22,19 @@ Synchronous (returns when the call completes).
 
 ## Errors thrown synchronously
 
-- **`SdkError.NotSupported`** — Active transport != Cloud.
-- **`SdkError.InvalidInput`** — Empty list, malformed fields.
-- **`SdkError.Network/Timeout/ConnectionTimeout/ReadTimeout/NonSuccessHttp`** — HTTP failures.
+- **`SdkError.InvalidInput`** — Required field missing.
+- **`SdkError.NotSupported`** — Active transport is not Cloud.
+- **`SdkError.TransportError` / `Timeout` / `Network` / `ConnectionTimeout` / `ReadTimeout` / `NonSuccessHttp`** — Cloud HTTP-layer failures.
 
 ## MUST
 
-- Only call when active transport is Cloud.
+- Set active transport to Cloud first (`set_transport(Cloud)`).
+- Never log `securityToken`.
+- Wrap the call in a background dispatcher (it blocks on HTTPS).
 
 ## MUST NOT
 
-- Do not log security_token.
+- Do not call on AppToApp / PADController — raises `NotSupported`.
 
 ## Transport support matrix
 
@@ -57,37 +50,47 @@ Synchronous (returns when the call completes).
 ### Android (Kotlin) — shipping
 
 ```kotlin
-val r = sdk.uploadImeiList(CloudUploadImeiListOptions(
-    merchantId = "MID", securityToken = TOKEN, storeId = "STORE",
+val opts = CloudUploadImeiListOptions(
+    merchantId = "MID",
+    securityToken = TOKEN,
+    storeId = "STORE-1",
     hardwareId = null,
     imeiList = listOf(CloudImeiListItem(imei = "353…", status = 1)),
-))
+)
+val result: UploadImeiListResult = sdk.uploadImeiList(opts)
 ```
 
 ### Android (Java) — shipping
 
 ```java
-UploadImeiListResult r = sdk.uploadImeiList(opts);
+CloudUploadImeiListOptions opts = new CloudUploadImeiListOptions(
+    "MID", TOKEN, "STORE-1", null,
+    java.util.List.of(new CloudImeiListItem("353…", 1))
+);
+UploadImeiListResult result = sdk.uploadImeiList(opts);
 ```
 
 ### JVM (Kotlin) — shipping
 
-> The JVM binding does NOT ship a façade; call the UniFFI-generated
-> class directly. There is no Android `Context` and no main-thread
-> guard.
-
 ```kotlin
-val r = sdk.uploadImeiList(CloudUploadImeiListOptions(
-    merchantId = "MID", securityToken = TOKEN, storeId = "STORE",
+val opts = CloudUploadImeiListOptions(
+    merchantId = "MID",
+    securityToken = TOKEN,
+    storeId = "STORE-1",
     hardwareId = null,
     imeiList = listOf(CloudImeiListItem(imei = "353…", status = 1)),
-))
+)
+val result: UploadImeiListResult = sdk.uploadImeiList(opts)
 ```
 
 ### JVM (Java) — shipping
 
 ```java
-UploadImeiListResult r = sdk.uploadImeiList(opts);
+CloudUploadImeiListOptions opts = new CloudUploadImeiListOptions(
+    "MID", TOKEN, "STORE-1", null,
+    java.util.List.of(new CloudImeiListItem("353…", 1))
+);
+UploadImeiListResult result = sdk.uploadImeiList(opts);
 ```
 
 ### Swift (iOS) — roadmap
@@ -95,7 +98,7 @@ UploadImeiListResult r = sdk.uploadImeiList(opts);
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```swift
-let r = try sdk.uploadImeiList(options: opts)
+// speculative — verify when the iOS binding ships
 ```
 
 ### Python — roadmap
@@ -103,7 +106,7 @@ let r = try sdk.uploadImeiList(options: opts)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```python
-r = sdk.upload_imei_list(opts)
+# speculative — verify when the Python binding ships
 ```
 
 ### Node.js — roadmap
@@ -111,7 +114,7 @@ r = sdk.upload_imei_list(opts)
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```javascript
-const r = sdk.uploadImeiList(opts);
+// speculative — verify when the Node.js binding ships
 ```
 
 ### C — roadmap
@@ -119,18 +122,15 @@ const r = sdk.uploadImeiList(opts);
 > ⚠️ **ROADMAP — NOT SHIPPING IN 0.5.0-preview.2**
 
 ```c
-pine_billing_sdk_upload_imei_list(sdk, &opts, &out, &err);
+/* speculative — verify when the C binding ships */
 ```
 
 ## Next docs to fetch
 
 - Models: `CloudUploadImeiListOptions`, `CloudImeiListItem`, `UploadImeiListResult`, `SdkError`
-- Concepts: `transports`
+- Concepts: `capabilities`, `error-handling`
 
 ## Notes for code generation
 
-- Always re-fetch this doc on any new SDK_VERSION — signature and
-  validation rules can change in pre-1.0 minor bumps.
-- If the user's TARGET_TRANSPORT is not consistent with this method
-  (see capability matrix in `concepts/capabilities.md`), refuse to
-  emit the call and ask the user to switch transport.
+- Always re-fetch this doc on any new SDK_VERSION — signature and validation rules can change in pre-1.0 minor bumps.
+- If the user's TARGET_TRANSPORT is not consistent with this method (see capability matrix in `concepts/capabilities.md`), refuse to emit the call and ask the user to switch transport.

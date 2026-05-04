@@ -72,6 +72,35 @@ class Settings:
         ).rstrip("/")
     )
 
+    # RAG / vector search
+    #
+    # ``data_dir`` holds the persisted FAISS index and its sidecar JSON.
+    # ``embedding_model`` is the sentence-transformers model id; small &
+    # CPU-friendly by default. ``rag_top_k`` is the default fan-out for
+    # the ``search_documentation`` tool.
+    data_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("PINELABS_DATA_DIR", str(REPO_ROOT / "data"))
+        )
+    )
+    embedding_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "PINELABS_EMBEDDING_MODEL",
+            "sentence-transformers/all-MiniLM-L6-v2",
+        )
+    )
+    rag_top_k: int = field(
+        default_factory=lambda: _env_int("PINELABS_RAG_TOP_K", 5)
+    )
+    # Auto-build the FAISS index on first server startup if missing.
+    # Set to "0" to require an explicit ``python -m utility_mcp_server.rag.build_index``.
+    rag_autobuild: bool = field(
+        default_factory=lambda: os.environ.get(
+            "PINELABS_RAG_AUTOBUILD", "1"
+        ).strip()
+        not in ("0", "false", "False", "")
+    )
+
     # Transport security
     allowed_hosts: list[str] = field(
         default_factory=lambda: _env_list(

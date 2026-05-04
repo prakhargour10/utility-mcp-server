@@ -43,6 +43,10 @@ def _build_mcp(settings: Settings) -> FastMCP:
         settings.docs_dir,
         settings.sdk_dir,
         settings.sdk_download_base_url,
+        data_dir=settings.data_dir,
+        embedding_model=settings.embedding_model,
+        rag_top_k=settings.rag_top_k,
+        rag_autobuild=settings.rag_autobuild,
     )
     return mcp
 

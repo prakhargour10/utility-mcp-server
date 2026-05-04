@@ -38,6 +38,8 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from .rag.index import RagIndex, get_or_load_index
+
 logger = logging.getLogger(__name__)
 
 _SDK_EXTENSIONS = {".aar", ".jar", ".zip", ".tar.gz", ".tgz", ".whl"}
@@ -133,11 +135,52 @@ def register(
     docs_dir: Path,
     sdk_dir: Path,
     sdk_download_base_url: str,
+    *,
+    data_dir: Path,
+    embedding_model: str,
+    rag_top_k: int = 5,
+    rag_autobuild: bool = True,
 ) -> None:
     """Attach all tools to the FastMCP server."""
+    rag_loader = _make_rag_loader(
+        docs_dir=docs_dir,
+        data_dir=data_dir,
+        embedding_model=embedding_model,
+        autobuild=rag_autobuild,
+    )
     _register_documentation_list(mcp, docs_dir)
-    _register_get_documentation(mcp, docs_dir)
+    _register_get_documentation(mcp, docs_dir, rag_loader)
+    _register_search_documentation(mcp, rag_loader, default_top_k=rag_top_k)
     _register_sdk_download(mcp, docs_dir, sdk_dir, sdk_download_base_url)
+
+
+def _make_rag_loader(
+    *,
+    docs_dir: Path,
+    data_dir: Path,
+    embedding_model: str,
+    autobuild: bool,
+):
+    """Return a zero-arg callable that lazily produces a ``RagIndex``.
+
+    The index is loaded on first use (not at server startup) so that:
+    * unit tests can import the package without paying the model load,
+    * a missing/broken index doesn't prevent the SDK + listing tools
+      from working.
+    """
+
+    def _loader() -> RagIndex | None:
+        try:
+            if not autobuild:
+                return RagIndex.load(data_dir, expected_model=embedding_model)
+            return get_or_load_index(
+                docs_dir, data_dir, model_name=embedding_model
+            )
+        except Exception as exc:  # noqa: BLE001 — RAG is best-effort
+            logger.warning("RAG index unavailable: %s", exc)
+            return None
+
+    return _loader
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +239,11 @@ def _register_documentation_list(mcp: FastMCP, docs_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # get_documentation
 # ---------------------------------------------------------------------------
-def _register_get_documentation(mcp: FastMCP, docs_dir: Path) -> None:
+def _register_get_documentation(
+    mcp: FastMCP,
+    docs_dir: Path,
+    rag_loader,
+) -> None:
     doc_root = _doc_list_dir(docs_dir)
 
     @mcp.tool(
@@ -298,6 +345,31 @@ def _register_get_documentation(mcp: FastMCP, docs_dir: Path) -> None:
         if not matches:
             scope = ", ".join(search_categories)
             logger.warning("Documentation not found for %r in [%s]", cleaned, scope)
+            # Semantic fallback: even if the literal key isn't a doc
+            # filename, the user's phrase often matches an existing
+            # doc's content. Surface the top suggestions so the LLM can
+            # retry ``get_documentation`` with a real key.
+            suggestions = _suggest_doc_keys(
+                rag_loader,
+                cleaned,
+                category_filter=(
+                    search_categories[0]
+                    if len(search_categories) == 1
+                    else None
+                ),
+            )
+            if suggestions:
+                bullets = "\n".join(
+                    f"  - {cat}/{key}  (score={score:.3f})"
+                    for cat, key, score in suggestions
+                )
+                return _text_response(
+                    f"Documentation '{name}' not found in [{scope}].\n"
+                    "Closest matches by semantic search:\n"
+                    f"{bullets}\n\n"
+                    "Re-run get_documentation with one of these keys, or "
+                    "call search_documentation for full snippets."
+                )
             return _text_response(
                 f"Documentation '{name}' not found in [{scope}]. "
                 "Use get_documentation_list to discover valid names."
@@ -355,6 +427,165 @@ def _register_get_documentation(mcp: FastMCP, docs_dir: Path) -> None:
             "--- END DOCUMENTATION ---\n"
         )
         return _text_response(wrapped)
+
+
+def _suggest_doc_keys(
+    rag_loader,
+    query: str,
+    *,
+    category_filter: str | None = None,
+    limit: int = 5,
+) -> list[tuple[str, str, float]]:
+    """Return ``[(category, doc_key, score), ...]`` deduped suggestions."""
+    rag = rag_loader()
+    if rag is None:
+        return []
+    try:
+        hits = rag.search(
+            query, top_k=limit * 3, category=category_filter
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("RAG suggest failed: %s", exc)
+        return []
+    seen: set[tuple[str, str]] = set()
+    out: list[tuple[str, str, float]] = []
+    for h in hits:
+        key = (h.category, h.doc_key)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append((h.category, h.doc_key, h.score))
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ---------------------------------------------------------------------------
+# search_documentation (RAG)
+# ---------------------------------------------------------------------------
+def _register_search_documentation(
+    mcp: FastMCP,
+    rag_loader,
+    *,
+    default_top_k: int,
+) -> None:
+    """Register the semantic-search tool over the docs corpus."""
+
+    category_alias = {
+        "": None,
+        "api": "apis",
+        "apis": "apis",
+        "model": "models",
+        "models": "models",
+        "language": "languages",
+        "languages": "languages",
+        "concept": "concepts",
+        "concepts": "concepts",
+    }
+
+    @mcp.tool(
+        name="search_documentation",
+        description=(
+            "Semantic search across the Pine Labs SDK documentation "
+            "corpus (APIs, models, language guides, concepts) using a "
+            "local FAISS vector index. Use this when the user describes "
+            "a behaviour, error, or concept in natural language and you "
+            "do NOT yet know the exact doc key.\n\n"
+            "Args:\n"
+            "  query (required): natural-language search phrase.\n"
+            "  top_k (optional, default 5): number of hits to return "
+            "(clamped to 1..20).\n"
+            "  category (optional): one of 'api', 'model', 'language', "
+            "'concept' to restrict the search.\n\n"
+            "Returns: a ranked list of matches with category, doc_key, "
+            "heading, similarity score, and a short snippet. After "
+            "choosing a hit, call get_documentation(name=<doc_key>, "
+            "category=<category>) to retrieve the full authoritative "
+            "markdown.\n\n"
+            "STRICT RULES:\n"
+            "1. Snippets are TRUNCATED for display only — do NOT answer "
+            "the user from a snippet alone. Always follow up with "
+            "get_documentation for the full body.\n"
+            "2. Do NOT invent doc_keys. Only use values returned by this "
+            "tool or by get_documentation_list."
+        ),
+    )
+    async def search_documentation(
+        query: str,
+        top_k: int = default_top_k,
+        category: str = "",
+    ) -> dict[str, Any]:
+        logger.info(
+            "Tool invoked: search_documentation(query=%r, top_k=%r, category=%r)",
+            query,
+            top_k,
+            category,
+        )
+        if not query or not query.strip():
+            return _text_response("Error: 'query' is required and cannot be empty.")
+
+        cat_key = (category or "").strip().lower()
+        if cat_key not in category_alias:
+            return _text_response(
+                f"Error: unknown category '{category}'. "
+                "Use one of: api, model, language, concept (or omit)."
+            )
+        cat_folder = category_alias[cat_key]
+
+        # Clamp top_k defensively.
+        try:
+            k = int(top_k)
+        except (TypeError, ValueError):
+            k = default_top_k
+        k = max(1, min(k, 20))
+
+        rag = rag_loader()
+        if rag is None:
+            return _text_response(
+                "Error: RAG index is not available on this server. "
+                "Ask the operator to run "
+                "`python -m utility_mcp_server.rag.build_index`."
+            )
+
+        try:
+            hits = rag.search(query.strip(), top_k=k, category=cat_folder)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("search_documentation failed")
+            return _text_response(f"Error during semantic search: {exc}")
+
+        if not hits:
+            scope = cat_folder or "all categories"
+            return _text_response(
+                f"No matches for '{query}' in {scope}. "
+                "Try rephrasing or removing the category filter."
+            )
+
+        lines = [
+            "=== PINE LABS SDK SEMANTIC SEARCH RESULTS ===",
+            f"query: {query}",
+            f"top_k: {k}"
+            + (f"  category: {cat_folder}" if cat_folder else ""),
+            f"index_size: {rag.size} chunks  model: {rag.model_name}",
+            "",
+            "RULES FOR THE ASSISTANT:",
+            "- These are RANKED candidates with TRUNCATED snippets.",
+            "- To answer the user, call get_documentation(name=<doc_key>, "
+            "category=<category>) for the most relevant hit(s) and use "
+            "the full markdown returned there.",
+            "- Do NOT answer from snippets alone.",
+            "",
+            "--- BEGIN HITS ---",
+        ]
+        for rank, h in enumerate(hits, start=1):
+            lines.append(
+                f"[{rank}] score={h.score:.4f}  category={h.category}  "
+                f"doc_key={h.doc_key}"
+                + (f"  heading={h.heading!r}" if h.heading else "")
+            )
+            lines.append(f"    snippet: {h.snippet}")
+            lines.append("")
+        lines.append("--- END HITS ---")
+        return _text_response("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------

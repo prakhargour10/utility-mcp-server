@@ -1,15 +1,14 @@
-"""Top-level CLI commands for managing the RAG vector database.
+"""Top-level CLI commands for managing the RAG vector store.
 
 Two entrypoints are exposed via ``pyproject.toml`` ``[project.scripts]``:
 
 * ``rag-rebuild`` — Chunk the markdown corpus under ``docs/``, embed each
-  chunk via Bedrock Titan, and save ``embeddings.json``. Use this whenever
-  the docs change or the embedding model / dimensions change.
+  chunk with Bedrock Titan v2 and save ``embeddings.json`` (chunks +
+  dense vectors). Use this whenever the docs change.
 
 * ``rag-load`` — Load the existing ``embeddings.json`` into memory and
-  report its size. Use this to verify that a prebuilt vector store is
-  available without spending Bedrock calls. Optionally runs a similarity
-  search via ``--query`` to smoke-test retrieval.
+  report its size. Optionally runs a FAISS dense search via ``--query``
+  to smoke-test retrieval.
 """
 
 from __future__ import annotations
@@ -23,9 +22,6 @@ from typing import Sequence
 
 from ..config import Settings, get_settings
 from .embed import (
-    BedrockTitanEmbedder,
-    DEFAULT_CONCURRENCY,
-    DEFAULT_EMBED_DIMENSIONS,
     VectorStore,
     build_vector_store,
 )
@@ -55,9 +51,8 @@ def _build_rebuild_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="rag-rebuild",
         description=(
-            "Rebuild the RAG vector database from scratch: chunk the local "
-            "markdown corpus, embed via Bedrock Titan, and persist to "
-            "embeddings.json."
+            "Rebuild the RAG chunk store from scratch: chunk the local "
+            "markdown corpus and persist to embeddings.json."
         ),
     )
     parser.add_argument(
@@ -67,14 +62,6 @@ def _build_rebuild_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--overlap", dest="chunk_overlap", type=int, default=128,
         help="Token overlap between chunks (default: 128).",
-    )
-    parser.add_argument(
-        "--dimensions", type=int, default=DEFAULT_EMBED_DIMENSIONS,
-        help=f"Embedding dimensions (default: {DEFAULT_EMBED_DIMENSIONS}).",
-    )
-    parser.add_argument(
-        "--concurrency", type=int, default=DEFAULT_CONCURRENCY,
-        help=f"Max concurrent Bedrock requests (default: {DEFAULT_CONCURRENCY}).",
     )
     parser.add_argument(
         "--output",
@@ -96,20 +83,18 @@ async def _do_rebuild(args: argparse.Namespace) -> int:
         return 2
 
     if out_path.exists():
-        logger.info("Removing stale embeddings file %s", out_path)
+        logger.info("Removing stale chunk store at %s", out_path)
         out_path.unlink()
 
-    logger.info("Building vector store from %s", docs_dir)
+    logger.info("Building chunk store from %s", docs_dir)
     store = await build_vector_store(
         settings,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
-        dimensions=args.dimensions,
-        concurrency=args.concurrency,
     )
 
     store.save(out_path)
-    logger.info("Saved %d embedded chunk(s) to %s", len(store), out_path)
+    logger.info("Saved %d chunk(s) to %s", len(store), out_path)
     print(f"\nrag-rebuild OK: {len(store)} chunks -> {out_path}")
     return 0
 
@@ -170,19 +155,8 @@ async def _do_load(args: argparse.Namespace) -> int:
     if not args.query:
         return 0
 
-    embedder = BedrockTitanEmbedder(
-        api_key=settings.bedrock_api_key,
-        region=settings.bedrock_region,
-        model=settings.bedrock_embedding_model,
-        dimensions=store.items[0].dimensions if store.items else DEFAULT_EMBED_DIMENSIONS,
-    )
-    try:
-        [vec] = await embedder.embed_many([args.query], concurrency=1)
-    finally:
-        await embedder.aclose()
-
-    hits = store.search(vec, top_k=args.top_k)
-    print(f"\nTop {len(hits)} hit(s) for query: {args.query!r}")
+    hits = await store.search(args.query, top_k=args.top_k)
+    print(f"\nTop {len(hits)} FAISS hit(s) for query: {args.query!r}")
     for i, h in enumerate(hits, 1):
         preview = h.chunk.text.strip().replace("\n", " ")
         if len(preview) > 120:

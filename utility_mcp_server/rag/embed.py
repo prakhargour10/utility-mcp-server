@@ -1,19 +1,29 @@
-"""Embed chunks via AWS Bedrock Titan (RAG pipeline stage 2).
+"""FAISS dense vector retrieval over the chunked Pine Labs docs corpus.
 
-Sends each :class:`Chunk` text through the Bedrock Titan embedding model
-(``amazon.titan-embed-text-v2:0`` by default) and returns dense float
-vectors, plus an in-memory store with similarity search.
+Embeddings are computed remotely via **Amazon Bedrock Titan Text
+Embeddings v2** (``amazon.titan-embed-text-v2:0``). This keeps the
+container small (no torch / sentence-transformers download), gives sub-
+second cold starts, and fits cleanly on small PaaS hosts like Railway --
+the embedding HTTPS call adds ~100 ms per query.
 
-Bedrock invocation uses the bearer-token auth mode (``BEDROCK_API_KEY``)
-against::
+Pipeline:
 
-    POST https://bedrock-runtime.<region>.amazonaws.com/model/<model>/invoke
+    docs/doc_list/**/*.md
+        -> SentenceSplitter chunking (chunk.py, LlamaIndex; ~1024 tokens)
+            -> Bedrock Titan v2 embeddings (float32[dim], L2-normalized)
+                -> VectorStore (in-memory list[Chunk] + faiss.IndexFlatIP)
+                    -> store.search(query, top_k)
+                        -> tools.py / generate.py
+
+Persistence: a JSON file at ``settings.rag_embeddings_path`` containing
+chunk metadata plus the dense embedding vector for each chunk. The FAISS
+index itself is rebuilt in-memory from these vectors on load -- this
+keeps the on-disk artifact portable across FAISS versions / architectures.
 
 Usage::
 
-    python -m utility_mcp_server.rag.embed
-    python -m utility_mcp_server.rag.embed --query "how do I init the SDK?"
     python -m utility_mcp_server.rag.embed --save data/embeddings.json
+    python -m utility_mcp_server.rag.embed --query "doTransaction" --top-k 5
 """
 
 from __future__ import annotations
@@ -22,10 +32,9 @@ import argparse
 import asyncio
 import json
 import logging
-import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable, Sequence
+from typing import Any, Sequence
 
 import httpx
 import numpy as np
@@ -34,7 +43,7 @@ try:
     import faiss  # type: ignore
 except ImportError as _faiss_exc:  # pragma: no cover - faiss is required at runtime
     faiss = None  # type: ignore
-    _FAISS_IMPORT_ERROR = _faiss_exc
+    _FAISS_IMPORT_ERROR: Exception | None = _faiss_exc
 else:
     _FAISS_IMPORT_ERROR = None
 
@@ -44,224 +53,181 @@ from .chunk import Chunk, chunk_documents
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_EMBED_DIMENSIONS = 1024  # Titan v2 supports 256 / 512 / 1024
-DEFAULT_CONCURRENCY = 4
-DEFAULT_TIMEOUT = 30.0
-
-# Process-wide singleton embedder. Reusing the underlying httpx.AsyncClient
-# keeps the TLS connection to Bedrock warm across requests and avoids the
-# ~100–300 ms handshake cost on every query.
-_titan_singleton: "BedrockTitanEmbedder | None" = None
-
-
-def get_titan_embedder(
-    *,
-    api_key: str,
-    region: str,
-    model: str,
-    dimensions: int = DEFAULT_EMBED_DIMENSIONS,
-    timeout: float = DEFAULT_TIMEOUT,
-) -> "BedrockTitanEmbedder":
-    """Return a process-wide cached Titan embedder.
-
-    A new instance is created only if the (model, region, dimensions) tuple
-    changes, which should never happen at runtime.
-    """
-    global _titan_singleton
-    if (
-        _titan_singleton is None
-        or _titan_singleton.model != model
-        or _titan_singleton._region != region
-        or _titan_singleton.dimensions != dimensions
-    ):
-        _titan_singleton = BedrockTitanEmbedder(
-            api_key=api_key,
-            region=region,
-            model=model,
-            dimensions=dimensions,
-            timeout=timeout,
-        )
-    return _titan_singleton
+DEFAULT_EMBED_DIM = 1024
+DEFAULT_EMBED_BATCH = 8
+DEFAULT_EMBED_TIMEOUT = 60.0
 
 
 # ---------------------------------------------------------------------------
 # Result types
 # ---------------------------------------------------------------------------
 @dataclass
-class EmbeddedChunk:
-    """A :class:`Chunk` paired with its dense embedding vector."""
-
-    chunk: Chunk
-    embedding: list[float]
-    model: str
-    dimensions: int
-
-    def to_dict(self) -> dict:
-        return {
-            "id": self.chunk.id,
-            "route": self.chunk.route,
-            "source_path": self.chunk.source_path,
-            "index": self.chunk.index,
-            "text": self.chunk.text,
-            "metadata": dict(self.chunk.metadata),
-            "model": self.model,
-            "dimensions": self.dimensions,
-            "embedding": self.embedding,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "EmbeddedChunk":
-        chunk = Chunk(
-            id=data["id"],
-            text=data["text"],
-            route=data["route"],
-            source_path=data["source_path"],
-            index=int(data["index"]),
-            metadata=dict(data.get("metadata") or {}),
-        )
-        return cls(
-            chunk=chunk,
-            embedding=list(data["embedding"]),
-            model=data["model"],
-            dimensions=int(data["dimensions"]),
-        )
-
-
-# ---------------------------------------------------------------------------
-# Bedrock client
-# ---------------------------------------------------------------------------
-class BedrockEmbeddingError(RuntimeError):
-    """Raised when the Bedrock embeddings API returns an error."""
-
-
-class BedrockTitanEmbedder:
-    """Async client for Bedrock Titan text embeddings (bearer-token auth)."""
-
-    def __init__(
-        self,
-        *,
-        api_key: str,
-        region: str,
-        model: str,
-        dimensions: int = DEFAULT_EMBED_DIMENSIONS,
-        timeout: float = DEFAULT_TIMEOUT,
-        normalize: bool = True,
-    ) -> None:
-        if not api_key:
-            raise ValueError(
-                "BEDROCK_API_KEY is empty. Set it in your environment / .env."
-            )
-        self._api_key = api_key
-        self._region = region
-        self._model = model
-        self._dimensions = dimensions
-        self._normalize = normalize
-        self._url = (
-            f"https://bedrock-runtime.{region}.amazonaws.com"
-            f"/model/{model}/invoke"
-        )
-        self._client = httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout),
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            },
-        )
-
-    @property
-    def model(self) -> str:
-        return self._model
-
-    @property
-    def dimensions(self) -> int:
-        return self._dimensions
-
-    async def aclose(self) -> None:
-        await self._client.aclose()
-
-    async def embed_one(self, text: str) -> list[float]:
-        if not text or not text.strip():
-            raise ValueError("Cannot embed empty text.")
-        payload = {
-            "inputText": text,
-            "dimensions": self._dimensions,
-            "normalize": self._normalize,
-        }
-        try:
-            resp = await self._client.post(self._url, json=payload)
-        except httpx.HTTPError as exc:
-            raise BedrockEmbeddingError(f"Network error calling Bedrock: {exc}") from exc
-
-        if resp.status_code >= 400:
-            raise BedrockEmbeddingError(
-                f"Bedrock embed failed ({resp.status_code}): {resp.text[:500]}"
-            )
-        try:
-            body = resp.json()
-        except ValueError as exc:
-            raise BedrockEmbeddingError(
-                f"Bedrock returned non-JSON body: {resp.text[:200]}"
-            ) from exc
-
-        embedding = body.get("embedding")
-        if not isinstance(embedding, list) or not embedding:
-            raise BedrockEmbeddingError(
-                f"Bedrock response missing 'embedding': {body!r}"
-            )
-        return [float(x) for x in embedding]
-
-    async def embed_many(
-        self,
-        texts: Sequence[str],
-        *,
-        concurrency: int = DEFAULT_CONCURRENCY,
-    ) -> list[list[float]]:
-        sem = asyncio.Semaphore(max(1, concurrency))
-
-        async def _bounded(t: str) -> list[float]:
-            async with sem:
-                return await self.embed_one(t)
-
-        return await asyncio.gather(*(_bounded(t) for t in texts))
-
-
-# ---------------------------------------------------------------------------
-# In-memory vector store
-# ---------------------------------------------------------------------------
-@dataclass
 class SearchHit:
-    """A single similarity-search result."""
+    """A single FAISS retrieval result.
+
+    ``score`` is the inner product between the query and chunk vectors.
+    Both are L2-normalized at embed time, so this is equivalent to
+    cosine similarity in ``[-1, 1]``.
+    """
 
     chunk: Chunk
     score: float
 
 
-@dataclass
-class VectorStore:
-    """In-memory vector store backed by a FAISS ``IndexFlatIP`` index.
+# ---------------------------------------------------------------------------
+# Bedrock Titan embedder
+# ---------------------------------------------------------------------------
+class BedrockTitanEmbedder:
+    """Async embedder backed by Amazon Bedrock Titan Text Embeddings v2.
 
-    Titan v2 embeddings are L2-normalized by default, so inner-product
-    similarity over normalized vectors is equivalent to cosine similarity.
-    The FAISS index is built lazily on the first :meth:`search` call (and
-    invalidated on every :meth:`add` / :meth:`extend`).
+    Uses the bearer-token auth path (``BEDROCK_API_KEY``) consistent with
+    the rest of this server. Returns ``float32`` numpy vectors that are
+    already L2-normalized (``normalize: true``).
     """
 
-    items: list[EmbeddedChunk] = field(default_factory=list)
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        dimensions: int = DEFAULT_EMBED_DIM,
+        timeout: float = DEFAULT_EMBED_TIMEOUT,
+    ) -> None:
+        self._settings = settings or get_settings()
+        self._dimensions = int(dimensions)
+        self._timeout = float(timeout)
+        if not self._settings.bedrock_api_key:
+            raise RuntimeError(
+                "BEDROCK_API_KEY is not configured. Set it in the environment "
+                "or .env to enable Bedrock Titan embeddings."
+            )
+
+    @property
+    def dimensions(self) -> int:
+        return self._dimensions
+
+    @property
+    def model(self) -> str:
+        return self._settings.bedrock_embedding_model
+
+    async def embed_one(self, text: str, client: httpx.AsyncClient) -> np.ndarray:
+        if not text or not text.strip():
+            raise ValueError("Cannot embed empty text.")
+        body = {
+            "inputText": text,
+            "dimensions": self._dimensions,
+            "normalize": True,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._settings.bedrock_api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        resp = await client.post(
+            self._settings.bedrock_embedding_url,
+            json=body,
+            headers=headers,
+            timeout=self._timeout,
+        )
+        if resp.status_code >= 400:
+            raise RuntimeError(
+                f"Bedrock embedding call failed ({resp.status_code}): "
+                f"{resp.text[:500]}"
+            )
+        data = resp.json()
+        vec = data.get("embedding")
+        if not vec:
+            raise RuntimeError(f"Bedrock response missing 'embedding': {data}")
+        arr = np.asarray(vec, dtype=np.float32)
+        if arr.shape[0] != self._dimensions:
+            raise RuntimeError(
+                f"Unexpected embedding dim: got {arr.shape[0]}, "
+                f"expected {self._dimensions}"
+            )
+        return arr
+
+    async def embed_many(
+        self,
+        texts: Sequence[str],
+        *,
+        batch_size: int = DEFAULT_EMBED_BATCH,
+    ) -> np.ndarray:
+        """Embed a list of texts with bounded concurrency."""
+        if not texts:
+            return np.zeros((0, self._dimensions), dtype=np.float32)
+
+        out: list[np.ndarray] = [
+            np.zeros(self._dimensions, dtype=np.float32) for _ in range(len(texts))
+        ]
+        sem = asyncio.Semaphore(max(1, int(batch_size)))
+
+        async with httpx.AsyncClient() as client:
+
+            async def _one(i: int, txt: str) -> None:
+                async with sem:
+                    out[i] = await self.embed_one(txt, client)
+                    if (i + 1) % 25 == 0 or i == len(texts) - 1:
+                        logger.info(
+                            "embedded %d/%d chunks (model=%s, dim=%d)",
+                            i + 1,
+                            len(texts),
+                            self.model,
+                            self._dimensions,
+                        )
+
+            await asyncio.gather(*(_one(i, t) for i, t in enumerate(texts)))
+
+        return np.vstack(out).astype(np.float32, copy=False)
+
+
+# ---------------------------------------------------------------------------
+# Vector store (FAISS)
+# ---------------------------------------------------------------------------
+@dataclass
+class VectorStore:
+    """In-memory chunk store with a lazy FAISS ``IndexFlatIP`` index."""
+
+    items: list[Chunk] = field(default_factory=list)
+    vectors: np.ndarray = field(
+        default_factory=lambda: np.zeros((0, DEFAULT_EMBED_DIM), dtype=np.float32)
+    )
+    dim: int = DEFAULT_EMBED_DIM
     _index: Any = field(default=None, init=False, repr=False)
     _index_size: int = field(default=0, init=False, repr=False)
+    _embedder: BedrockTitanEmbedder | None = field(
+        default=None, init=False, repr=False
+    )
 
-    def add(self, item: EmbeddedChunk) -> None:
-        self.items.append(item)
+    # -- mutation -------------------------------------------------------
+    def add(self, chunk: Chunk, vector: np.ndarray) -> None:
+        v = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+        if v.shape[1] != self.dim:
+            raise ValueError(f"Vector dim {v.shape[1]} != store dim {self.dim}")
+        self.items.append(chunk)
+        self.vectors = (
+            v if self.vectors.size == 0 else np.vstack([self.vectors, v])
+        )
         self._index = None
 
-    def extend(self, items: Iterable[EmbeddedChunk]) -> None:
-        self.items.extend(items)
+    def extend(self, chunks: Sequence[Chunk], vectors: np.ndarray) -> None:
+        vectors = np.asarray(vectors, dtype=np.float32)
+        if len(chunks) != vectors.shape[0]:
+            raise ValueError("chunks and vectors must have the same length")
+        if vectors.shape[1] != self.dim:
+            raise ValueError(
+                f"Vector dim {vectors.shape[1]} != store dim {self.dim}"
+            )
+        self.items.extend(chunks)
+        self.vectors = (
+            vectors
+            if self.vectors.size == 0
+            else np.vstack([self.vectors, vectors])
+        )
         self._index = None
 
     def __len__(self) -> int:
         return len(self.items)
 
+    # -- FAISS ----------------------------------------------------------
     def _ensure_index(self) -> Any:
         if not self.items:
             return None
@@ -271,45 +237,71 @@ class VectorStore:
             raise RuntimeError(
                 "faiss is not installed. Install it with `pip install faiss-cpu`."
             ) from _FAISS_IMPORT_ERROR
-
-        dim = self.items[0].dimensions
-        matrix = np.asarray(
-            [item.embedding for item in self.items], dtype="float32"
-        )
-        if matrix.shape[1] != dim:
-            raise ValueError(
-                f"Embedding dim mismatch: expected {dim}, got {matrix.shape[1]}"
-            )
-        index = faiss.IndexFlatIP(dim)
-        index.add(matrix)
+        index = faiss.IndexFlatIP(self.dim)
+        index.add(np.ascontiguousarray(self.vectors, dtype=np.float32))
         self._index = index
         self._index_size = len(self.items)
-        logger.info("Built FAISS IndexFlatIP (n=%d, dim=%d)", index.ntotal, dim)
+        logger.info(
+            "Built FAISS IndexFlatIP (n=%d, dim=%d)", len(self.items), self.dim
+        )
         return index
 
-    def search(self, query_embedding: Sequence[float], top_k: int = 5) -> list[SearchHit]:
+    def _get_embedder(self) -> BedrockTitanEmbedder:
+        if self._embedder is None:
+            self._embedder = BedrockTitanEmbedder(dimensions=self.dim)
+        return self._embedder
+
+    async def embed_query(self, query_text: str) -> np.ndarray:
+        embedder = self._get_embedder()
+        async with httpx.AsyncClient() as client:
+            return await embedder.embed_one(query_text, client)
+
+    async def search(self, query_text: str, top_k: int = 5) -> list[SearchHit]:
+        """Embed ``query_text`` and run FAISS top-k inner-product search."""
         index = self._ensure_index()
         if index is None:
             return []
+        if not query_text or not query_text.strip():
+            return []
+        qvec = await self.embed_query(query_text)
+        return self.search_by_vector(qvec, top_k=top_k)
+
+    def search_by_vector(
+        self, query_vec: np.ndarray, top_k: int = 5
+    ) -> list[SearchHit]:
+        index = self._ensure_index()
+        if index is None:
+            return []
+        q = np.asarray(query_vec, dtype=np.float32).reshape(1, -1)
+        if q.shape[1] != self.dim:
+            raise ValueError(f"Query dim {q.shape[1]} != store dim {self.dim}")
         k = max(1, min(int(top_k), len(self.items)))
-        query = np.asarray([list(query_embedding)], dtype="float32")
-        if query.shape[1] != self.items[0].dimensions:
-            raise ValueError(
-                f"Vector dim mismatch: {query.shape[1]} vs "
-                f"{self.items[0].dimensions}"
-            )
-        scores, idxs = index.search(query, k)
+        scores, idxs = index.search(np.ascontiguousarray(q), k)
         hits: list[SearchHit] = []
-        for score, i in zip(scores[0].tolist(), idxs[0].tolist()):
-            if i < 0:
+        for score, idx in zip(scores[0].tolist(), idxs[0].tolist()):
+            if idx < 0:
                 continue
-            hits.append(SearchHit(chunk=self.items[i].chunk, score=float(score)))
+            hits.append(SearchHit(chunk=self.items[int(idx)], score=float(score)))
         return hits
 
-    # -- persistence ----------------------------------------------------
+    # -- persistence ---------------------------------------------------
     def save(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        payload = [item.to_dict() for item in self.items]
+        payload = {
+            "dim": int(self.dim),
+            "items": [
+                {
+                    "id": c.id,
+                    "route": c.route,
+                    "source_path": c.source_path,
+                    "index": c.index,
+                    "text": c.text,
+                    "metadata": dict(c.metadata),
+                    "embedding": self.vectors[i].astype(np.float32).tolist(),
+                }
+                for i, c in enumerate(self.items)
+            ],
+        }
         path.write_text(
             json.dumps(payload, ensure_ascii=False), encoding="utf-8"
         )
@@ -317,85 +309,85 @@ class VectorStore:
     @classmethod
     def load(cls, path: Path) -> "VectorStore":
         data = json.loads(path.read_text(encoding="utf-8"))
-        return cls(items=[EmbeddedChunk.from_dict(d) for d in data])
 
+        # Tolerate the legacy BM25-only format (a flat list of chunk dicts
+        # without embeddings). In that case we return an empty store so
+        # the caller can detect it and trigger a rebuild.
+        if isinstance(data, list):
+            logger.warning(
+                "Legacy chunk store detected at %s -- embeddings missing. "
+                "Run `rag-rebuild` to regenerate the FAISS index.",
+                path,
+            )
+            return cls(
+                items=[],
+                vectors=np.zeros((0, DEFAULT_EMBED_DIM), dtype=np.float32),
+            )
 
-def _cosine(a: Sequence[float], b: Sequence[float]) -> float:
-    """Pure-Python cosine similarity (kept for tests / non-FAISS callers)."""
-    if len(a) != len(b):
-        raise ValueError(f"Vector dim mismatch: {len(a)} vs {len(b)}")
-    dot = 0.0
-    na = 0.0
-    nb = 0.0
-    for x, y in zip(a, b):
-        dot += x * y
-        na += x * x
-        nb += y * y
-    if na == 0 or nb == 0:
-        return 0.0
-    return dot / (math.sqrt(na) * math.sqrt(nb))
+        dim = int(data.get("dim", DEFAULT_EMBED_DIM))
+        raw_items = data.get("items") or []
+        items: list[Chunk] = []
+        vectors: list[list[float]] = []
+        for d in raw_items:
+            emb = d.get("embedding")
+            if not emb:
+                logger.warning(
+                    "Item %s in %s has no embedding -- treating store as empty.",
+                    d.get("id"),
+                    path,
+                )
+                return cls(
+                    items=[],
+                    vectors=np.zeros((0, dim), dtype=np.float32),
+                    dim=dim,
+                )
+            items.append(
+                Chunk(
+                    id=d["id"],
+                    text=d["text"],
+                    route=d["route"],
+                    source_path=d["source_path"],
+                    index=int(d["index"]),
+                    metadata=dict(d.get("metadata") or {}),
+                )
+            )
+            vectors.append(emb)
+        mat = (
+            np.asarray(vectors, dtype=np.float32)
+            if vectors
+            else np.zeros((0, dim), dtype=np.float32)
+        )
+        return cls(items=items, vectors=mat, dim=dim)
 
 
 # ---------------------------------------------------------------------------
 # High-level pipeline
 # ---------------------------------------------------------------------------
-async def embed_chunks(
-    chunks: Sequence[Chunk],
-    *,
-    embedder: BedrockTitanEmbedder,
-    concurrency: int = DEFAULT_CONCURRENCY,
-) -> list[EmbeddedChunk]:
-    if not chunks:
-        return []
-    logger.info(
-        "Embedding %d chunk(s) with %s (dim=%d, concurrency=%d)",
-        len(chunks),
-        embedder.model,
-        embedder.dimensions,
-        concurrency,
-    )
-    vectors = await embedder.embed_many(
-        [c.text for c in chunks], concurrency=concurrency
-    )
-    return [
-        EmbeddedChunk(
-            chunk=c,
-            embedding=v,
-            model=embedder.model,
-            dimensions=embedder.dimensions,
-        )
-        for c, v in zip(chunks, vectors)
-    ]
-
-
 async def build_vector_store(
     settings: Settings | None = None,
     *,
     chunk_size: int = 1024,
     chunk_overlap: int = 128,
-    dimensions: int = DEFAULT_EMBED_DIMENSIONS,
-    concurrency: int = DEFAULT_CONCURRENCY,
+    embed_dim: int = DEFAULT_EMBED_DIM,
+    embed_batch: int = DEFAULT_EMBED_BATCH,
+    **_unused: Any,
 ) -> VectorStore:
-    """End-to-end: read raw docs -> chunk -> embed -> in-memory store."""
+    """Read raw docs -> chunk -> embed -> populate FAISS-backed store."""
     settings = settings or get_settings()
     chunks = chunk_documents(
         raw_docs_dir=settings.rag_raw_docs_dir,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
     )
-    embedder = BedrockTitanEmbedder(
-        api_key=settings.bedrock_api_key,
-        region=settings.bedrock_region,
-        model=settings.bedrock_embedding_model,
-        dimensions=dimensions,
-    )
-    try:
-        embedded = await embed_chunks(chunks, embedder=embedder, concurrency=concurrency)
-    finally:
-        await embedder.aclose()
+    store = VectorStore(dim=embed_dim)
+    if not chunks:
+        return store
 
-    store = VectorStore()
-    store.extend(embedded)
+    embedder = BedrockTitanEmbedder(settings, dimensions=embed_dim)
+    vectors = await embedder.embed_many(
+        [c.text for c in chunks], batch_size=embed_batch
+    )
+    store.extend(chunks, vectors)
     return store
 
 
@@ -406,41 +398,31 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m utility_mcp_server.rag.embed",
         description=(
-            "Embed chunked Pine Labs docs with Bedrock Titan and "
-            "(optionally) run a similarity-search query (RAG stage 3)."
+            "Build the FAISS dense-vector store for the Pine Labs SDK docs "
+            "and (optionally) run a similarity search."
         ),
     )
     parser.add_argument("--chunk-size", type=int, default=1024)
     parser.add_argument("--overlap", dest="chunk_overlap", type=int, default=128)
-    parser.add_argument(
-        "--dimensions",
-        type=int,
-        default=DEFAULT_EMBED_DIMENSIONS,
-        help=f"Embedding dimensions (default: {DEFAULT_EMBED_DIMENSIONS}).",
-    )
-    parser.add_argument(
-        "--concurrency",
-        type=int,
-        default=DEFAULT_CONCURRENCY,
-        help=f"Max concurrent Bedrock requests (default: {DEFAULT_CONCURRENCY}).",
-    )
+    parser.add_argument("--embed-dim", type=int, default=DEFAULT_EMBED_DIM)
+    parser.add_argument("--embed-batch", type=int, default=DEFAULT_EMBED_BATCH)
     parser.add_argument(
         "--save",
         type=Path,
         default=None,
-        help="Persist the in-memory vector store as JSON to this path.",
+        help="Persist the store (chunks + embeddings) as JSON to this path.",
     )
     parser.add_argument(
         "--load",
         type=Path,
         default=None,
-        help="Load a previously saved vector store JSON instead of re-embedding.",
+        help="Load a previously saved store JSON instead of re-chunking/embedding.",
     )
     parser.add_argument(
         "--query",
         type=str,
         default=None,
-        help="Optional query text — runs FAISS similarity search over the store.",
+        help="Optional query text -- runs FAISS search over the store.",
     )
     parser.add_argument("--top-k", type=int, default=5)
     parser.add_argument("--log-level", default="INFO")
@@ -452,48 +434,34 @@ async def _amain(args) -> int:
 
     if args.load:
         store = VectorStore.load(args.load)
-        logger.info("Loaded %d embedded chunk(s) from %s", len(store), args.load)
+        logger.info("Loaded %d chunk(s) from %s", len(store), args.load)
     else:
         store = await build_vector_store(
             settings,
             chunk_size=args.chunk_size,
             chunk_overlap=args.chunk_overlap,
-            dimensions=args.dimensions,
-            concurrency=args.concurrency,
+            embed_dim=args.embed_dim,
+            embed_batch=args.embed_batch,
         )
 
     if not store.items:
-        print("No chunks were embedded \u2014 is the docs directory populated?")
+        print("No chunks were produced -- is the docs directory populated?")
         return 1
 
-    sample = store.items[0]
-    print(
-        f"\nEmbedded {len(store)} chunk(s) "
-        f"(model={sample.model}, dim={sample.dimensions})"
-    )
+    print(f"\nIndexed {len(store)} chunk(s) (dim={store.dim})")
     by_route: dict[str, int] = {}
     for item in store.items:
-        by_route[item.chunk.route] = by_route.get(item.chunk.route, 0) + 1
+        by_route[item.route] = by_route.get(item.route, 0) + 1
     for route, n in sorted(by_route.items()):
-        print(f"  - {route}: {n} vector(s)")
+        print(f"  - {route}: {n} chunk(s)")
 
     if args.save:
         store.save(args.save)
         print(f"\nSaved vector store -> {args.save}")
 
     if args.query:
-        embedder = BedrockTitanEmbedder(
-            api_key=settings.bedrock_api_key,
-            region=settings.bedrock_region,
-            model=settings.bedrock_embedding_model,
-            dimensions=sample.dimensions,
-        )
-        try:
-            qvec = await embedder.embed_one(args.query)
-        finally:
-            await embedder.aclose()
-        hits = store.search(qvec, top_k=args.top_k)
-        print(f"\nTop {len(hits)} result(s) for: {args.query!r}")
+        hits = await store.search(args.query, top_k=args.top_k)
+        print(f"\nTop {len(hits)} FAISS result(s) for: {args.query!r}")
         for rank, hit in enumerate(hits, 1):
             preview = hit.chunk.text[:140].replace("\n", " ")
             print(
@@ -516,3 +484,12 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+
+
+__all__ = [
+    "BedrockTitanEmbedder",
+    "SearchHit",
+    "VectorStore",
+    "build_vector_store",
+    "DEFAULT_EMBED_DIM",
+]

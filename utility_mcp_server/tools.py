@@ -16,8 +16,7 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from .config import Settings
-from .rag.embed import BedrockEmbeddingError
-from .rag.generate import BedrockClaudeError, answer_question
+from .rag.generate import answer_question
 from .rag.store import get_vector_store
 
 logger = logging.getLogger(__name__)
@@ -193,9 +192,9 @@ def _register_rag(mcp: FastMCP, settings: Settings) -> None:
                 settings=settings,
                 top_k=top_k,
             )
-        except (BedrockEmbeddingError, BedrockClaudeError) as exc:
-            logger.warning("Bedrock error: %s", exc)
-            return _text_response(f"Bedrock error: {exc}")
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.exception("RAG retrieval failed")
+            return _text_response(f"Error: {exc}")
 
         sources_block = (
             "\n".join(
@@ -206,7 +205,7 @@ def _register_rag(mcp: FastMCP, settings: Settings) -> None:
         )
 
         body = (
-            "=== ANSWER (grounded in Pine Labs docs) ===\n"
+            "=== RETRIEVED CHUNKS (Pine Labs docs, FAISS) ===\n"
             f"{result.answer}\n\n"
             "=== SOURCES ===\n"
             f"{sources_block}\n"

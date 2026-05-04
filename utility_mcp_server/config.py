@@ -100,7 +100,7 @@ class Settings:
     )
 
     # ------------------------------------------------------------------
-    # AWS Bedrock (Claude + Titan embeddings)
+    # AWS Bedrock (Claude generation + Titan embeddings)
     # ------------------------------------------------------------------
     bedrock_api_key: str = field(
         default_factory=lambda: os.environ.get("BEDROCK_API_KEY", "")

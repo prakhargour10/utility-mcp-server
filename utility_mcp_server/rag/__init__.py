@@ -4,8 +4,7 @@ Pipeline stages:
 
     Local docs (markdown corpus under ``docs/``)
         -> Chunking (LlamaIndex SentenceSplitter)
-            -> Embedding (Bedrock Titan)
-                -> In-memory vector store
+            -> Embedding (Bedrock Titan v2)
+                -> FAISS in-memory dense vector store
                     -> Query / similarity search
-                        -> LLM (Bedrock Claude) answer
 """

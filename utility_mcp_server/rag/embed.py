@@ -126,7 +126,12 @@ class LocalSentenceTransformerEmbedder:
             cached = SentenceTransformer(self._model_name)
             self._model_cache[self._model_name] = cached
         self._model = cached
-        self._dimensions = int(cached.get_sentence_embedding_dimension())
+        # `get_embedding_dimension` is the v5+ name; fall back to the
+        # deprecated `get_sentence_embedding_dimension` for older installs.
+        get_dim = getattr(
+            cached, "get_embedding_dimension", None
+        ) or cached.get_sentence_embedding_dimension
+        self._dimensions = int(get_dim())
         if (
             self._requested_dim is not None
             and self._requested_dim != self._dimensions

@@ -14,6 +14,9 @@ dependencies = [
     "fastapi>=0.100.0",
     "uvicorn>=0.20.0",
     "httpx>=0.27.0",
+    "faiss-cpu>=1.8.0",
+    "sentence-transformers>=2.7.0",
+    "numpy>=1.26",
 ]
 
 [project.optional-dependencies]
@@ -24,6 +27,7 @@ dev = [
 
 [project.scripts]
 utility-mcp-server = "utility_mcp_server.cli:main"
+utility-mcp-build-index = "utility_mcp_server.rag.build_index:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["utility_mcp_server"]

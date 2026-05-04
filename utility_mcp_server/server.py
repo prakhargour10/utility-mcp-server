@@ -130,7 +130,7 @@ def _warmup_vector_store(settings: Settings) -> None:
     Loading a saved ``embeddings.json`` is just a synchronous file read, so
     paying that cost during process boot keeps the first user request fast.
     Skipped when no saved store exists, since building from scratch would
-    issue Bedrock embedding calls and significantly delay startup.
+    load the local embedding model and significantly delay startup.
     """
     if not settings.rag_embeddings_path.exists():
         logger.info(

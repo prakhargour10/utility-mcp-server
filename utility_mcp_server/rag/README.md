@@ -8,10 +8,10 @@ This document is the "design rationale" for the code in this folder:
 ```
 utility_mcp_server/rag/
 ├── chunk.py      # Stage 1 — split docs/**/*.md into Chunk[] (sentence-aware)
-├── embed.py      # Stage 2 — embed Chunks via Bedrock Titan v2 -> float[1024]
-│                 #           + tiny in-memory cosine VectorStore (persisted to JSON)
+├── embed.py      # Stage 2 — embed Chunks via local sentence-transformers -> float[384]
+│                 #           + FAISS IndexFlatIP VectorStore (persisted to JSON)
 ├── store.py      # Process-wide singleton that lazy-loads the VectorStore
-└── generate.py   # Stage 3 — retrieve top-k + answer with Bedrock Claude (Converse)
+└── generate.py   # Stage 3 — retrieve top-k from FAISS (no LLM call)
 ```
 
 The markdown corpus that feeds the pipeline lives in the repo at
@@ -64,7 +64,7 @@ The LLM stops being "an oracle" and becomes "a reading-comprehension engine over
                                   build grounded prompt               │
                                             │                         │
                                             ▼                         │
-                                3. GENERATE  (Claude /converse)       │
+                                3. GENERATE  (stitched chunks + cites) │
                                             │                         │
                                             ▼                         │
                                  answer + cited sources               │
@@ -137,8 +137,8 @@ We use LlamaIndex's `SentenceSplitter` with `chunk_size=1024` tokens and `chunk_
 
 This is the stage you flagged. There are actually **two** decisions here:
 
-1. **Which embedding model?** → Bedrock **Titan Text Embeddings v2** (`amazon.titan-embed-text-v2:0`), output dim **1024**, normalized.
-2. **Which vector store?** → A tiny **in-memory list with cosine similarity**, persisted to `data/embeddings.json`.
+1. **Which embedding model?** → **`sentence-transformers/all-MiniLM-L6-v2`** (local, runs on CPU), output dim **384**, L2-normalized.
+2. **Which vector store?** → A **FAISS `IndexFlatIP`** index over an in-memory `list[Chunk]`, persisted to `data/embeddings.json`.
 
 ### 5.1 What is an embedding, really?
 
@@ -146,26 +146,24 @@ An embedding model maps a piece of text to a fixed-length vector of floats (here
 
 "Initialize the SDK" and "How do I call `init()`?" produce vectors with high cosine similarity even though they share almost no words. That's the whole magic — it lets us search by **meaning**, not by **keywords**.
 
-### 5.2 Why Bedrock Titan v2?
+### 5.2 Why `all-MiniLM-L6-v2` (local)?
 
-| Criterion | Titan v2 | Why it matters here |
+| Criterion | MiniLM-L6-v2 | Why it matters here |
 |---|---|---|
-| **Quality** | Strong general-purpose English embeddings; competitive on retrieval benchmarks. | Our corpus is English technical docs. |
-| **Dimensions** | Configurable: 256 / 512 / **1024**. We picked 1024 for max recall on a small corpus. | Storage is trivial at this scale (a few MB). |
-| **Normalization** | Built-in `normalize: true` returns unit vectors. | Cosine similarity becomes a plain dot product → faster + simpler code. |
-| **Auth model** | Bearer token (`BEDROCK_API_KEY`) — no SigV4 dance. | Matches how the rest of this server already talks to Bedrock (see `generate.py`). |
-| **Same provider as the LLM** | Claude (for generation) is also on Bedrock. | One vendor, one credential, one IAM boundary, one billing line. |
-| **Data residency / privacy** | Stays inside AWS Bedrock. | No third-party SaaS sees the docs or the user queries. |
+| **Quality** | Solid general-purpose English embeddings; widely benchmarked. | Our corpus is English technical docs. |
+| **Dimensions** | 384 | Tiny on disk, fast to dot-product, plenty of signal for ~hundreds of chunks. |
+| **Cost** | Zero per-query cost, zero network egress. | No vendor lock-in, no API key, no rate limits. |
+| **Privacy** | Inference happens entirely in-process. | Docs and queries never leave the host. |
+| **Footprint** | ~80 MB model download, CPU-friendly. | Fits on small PaaS hosts and laptops alike. |
 
 ### 5.3 Embedding alternatives we did *not* pick
 
 | Option | Why not (for *this* project) |
 |---|---|
-| **OpenAI `text-embedding-3-small/large`** | Excellent, often top of leaderboards, but adds a second vendor + API key + billing relationship. We're already on Bedrock for Claude. |
-| **Cohere Embed v3** (also on Bedrock) | Strong alternative; multilingual edge. Titan was chosen for AWS-native simplicity and dimensional flexibility. Easy to swap later — only `BedrockTitanEmbedder` would change. |
-| **Self-hosted sentence-transformers** (e.g. `all-MiniLM-L6-v2`, `bge-small-en`) | Free at inference time, no network. But: you need a GPU/CPU host, model downloads (~hundreds of MB), warm-up time, and you own the ops. Not worth it for a hobby/utility MCP server. |
-| **Instructor / E5 / GTE family (self-hosted)** | Same trade-off. Better quality than MiniLM but heavier. |
-| **Sparse / lexical (BM25, TF-IDF)** | Zero ML, instant, no API cost. Great as a *complement*, but alone it can't match paraphrases ("init" vs "initialize"). Best used in a hybrid setup once you outgrow pure dense. |
+| **OpenAI `text-embedding-3-small/large`** | Excellent, but adds a vendor + API key + per-call billing. We want a fully local pipeline. |
+| **Bedrock Titan / Cohere Embed v3** (managed) | Strong, but require AWS credentials and network egress. Out of scope for the local mode. |
+| **Larger sentence-transformers** (`bge-base-en`, `gte-large`, `e5-large`) | Higher quality, but several hundred MB and slower on CPU. MiniLM is the right size/speed trade-off for this corpus. |
+| **Sparse / lexical (BM25, TF-IDF)** | Zero ML, instant. Great as a *complement*, but alone it can't match paraphrases ("init" vs "initialize"). Best used in a hybrid setup once you outgrow pure dense. |
 | **Train your own embedding model** | Months of work, needs labeled pairs. Not justifiable for any project this size. |
 
 ### 5.4 Why an *in-memory* vector store with cosine similarity?
@@ -195,12 +193,12 @@ This is ~30 lines of code. It exists because of one number: **N**, the number of
 **Our N is in the dozens.** Spinning up a vector DB would be pure ceremony — more moving parts to operate, more failure modes, more secrets to rotate, all to "speed up" a search that already takes <1 ms.
 
 #### Why cosine similarity?
-- The Titan embeddings come back **L2-normalized** (we ask for `normalize: true`). For unit vectors, **cosine similarity == dot product**, so the math reduces to one BLAS-friendly operation.
+- The MiniLM embeddings are returned **L2-normalized** (we pass `normalize_embeddings=True`). For unit vectors, **cosine similarity == dot product**, which is exactly what FAISS `IndexFlatIP` computes.
 - Cosine ignores vector magnitude and only compares **direction = meaning**, which is what we want for semantic similarity.
 - Euclidean distance would also work on normalized vectors (it's monotonically related to cosine), so the choice is mostly idiomatic.
 
 #### Why persist to `data/embeddings.json`?
-- Embedding the full corpus calls Bedrock once per chunk → it costs **money + time**. We don't want to pay it on every server boot.
+- Embedding the full corpus runs the local model once per chunk → it costs **time** (and on cold start, a model download). We don't want to pay it on every server boot.
 - JSON is human-readable, diffable, trivially portable, and good enough at this size. `store.py` lazy-loads it on first request and caches it for the process lifetime.
 
 #### Alternatives we did *not* pick (yet)
@@ -214,26 +212,19 @@ This is ~30 lines of code. It exists because of one number: **N**, the number of
 
 ---
 
-## 6. Stage 3 — Retrieve + Generate (`generate.py`)
+## 6. Stage 3 — Retrieve (`generate.py`)
 
-**Job:** answer the user's question, grounded in retrieved chunks.
+**Job:** answer the user's question using the top-k retrieved chunks. There is **no LLM call** in local mode — the "answer" is a deterministic stitching of the retrieved chunk text plus their `[route#index]` citations, which the MCP client (or upstream LLM) can consume directly.
 
 Pipeline per query:
 
-1. **Embed the question** with the same Titan model. (Critical: query and documents *must* use the same embedding space.)
-2. **Search** the vector store for the top-k (default 4) most similar chunks.
-3. **Build a grounded prompt** that:
-   - Lists each chunk with its bracketed ID (e.g. `[api/init#0]`).
-   - Includes a strict **system prompt** telling Claude to use *only* the context, cite chunk IDs, and refuse if the answer isn't there.
-4. **Call Bedrock Claude** via the **Converse API** to produce the answer.
-5. Return `GenerationResult { answer, sources[] }`.
+1. **Embed the question** with the same local sentence-transformers model. (Critical: query and documents *must* use the same embedding space.)
+2. **Search** the FAISS index for the top-k most similar chunks.
+3. **Stitch** the chunks into a single answer block, each prefixed with its `[route#index]` id.
+4. Return `GenerationResult { answer, sources[] }`.
 
-### Why Claude on Bedrock (and not the embedding model)?
-Embedding models and generation models are different beasts:
-- Embedding models output a single vector — they don't "talk."
-- Generation models (Claude, GPT, Llama) produce text — they don't give you a clean similarity vector.
-
-You need both, and they're orthogonal choices.
+### Why no LLM call in local mode?
+The pipeline ships zero secrets and zero outbound calls. Citation-rich retrieval results are returned verbatim, so any caller (including a downstream LLM) can use them as grounded context without this server needing its own model credentials.
 
 ### Why such a strict system prompt?
 The single biggest risk in RAG is the model **ignoring the context** and answering from its training data — which, for a private SDK, means **hallucinated APIs**. The system prompt is your last line of defense:
@@ -278,10 +269,10 @@ In production (the MCP server), Stage 3 runs per request and `store.py` keeps th
 |---|---|---|
 | Source | In-repo `docs/` markdown corpus, committed to git | Deterministic, diffable, decouples chunking from any network. |
 | Chunk | LlamaIndex `SentenceSplitter`, 1024 tokens / 128 overlap, ID = `route#index` | Sentence-aware > byte-slicing; overlap preserves boundary context; stable IDs power citations. |
-| Embed | Bedrock **Titan v2**, 1024-dim, normalized | Same vendor as the LLM (one auth, one bill); strong quality; normalization makes cosine = dot product. |
+| Embed | Local **`all-MiniLM-L6-v2`**, 384-dim, normalized | Zero per-query cost, no network egress; strong quality; normalization makes cosine = dot product. |
 | Vector store | **In-memory list + cosine**, persisted to `embeddings.json` | N is tiny → flat scan is microseconds. A vector DB would be ceremony, not value. JSON keeps it portable + auditable. Easy to swap later. |
 | Retrieve | top-k = 4 over the in-memory store | Small, focused prompt → cheap, fast, and easy to cite. |
-| Generate | Bedrock **Claude** via Converse API + strict grounded system prompt | Forces faithful, cited answers; refuses gracefully when context is missing. |
+| Generate | None — deterministic stitching of retrieved chunks with `[route#index]` citations | Local mode ships no LLM credentials; the caller (or a downstream LLM) consumes the cited context directly. |
 
 ### The mental model to take with you
 

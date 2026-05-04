@@ -7,7 +7,7 @@ concatenation of the top-k retrieved chunks, prefixed with their
 Flow:
 
     question
-      -> Bedrock Titan embedding
+      -> local sentence-transformers embedding
         -> FAISS IndexFlatIP top-k search over VectorStore
           -> stitched answer (chunk text + citations)
 
@@ -87,8 +87,8 @@ class GenerationResult:
 class BedrockClaudeError(RuntimeError):
     """Deprecated. Retained as an importable symbol for back-compat.
 
-    The pipeline no longer calls Bedrock, so this exception is never
-    raised internally. Callers can stop catching it.
+    The pipeline runs fully locally and never calls Bedrock, so this
+    exception is never raised internally. Callers can stop catching it.
     """
 
 

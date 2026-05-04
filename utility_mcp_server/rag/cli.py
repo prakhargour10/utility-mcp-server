@@ -3,8 +3,9 @@
 Two entrypoints are exposed via ``pyproject.toml`` ``[project.scripts]``:
 
 * ``rag-rebuild`` — Chunk the markdown corpus under ``docs/``, embed each
-  chunk with Bedrock Titan v2 and save ``embeddings.json`` (chunks +
-  dense vectors). Use this whenever the docs change.
+  chunk with the local sentence-transformers model and save
+  ``embeddings.json`` (chunks + dense vectors). Use this whenever the
+  docs change.
 
 * ``rag-load`` — Load the existing ``embeddings.json`` into memory and
   report its size. Optionally runs a FAISS dense search via ``--query``

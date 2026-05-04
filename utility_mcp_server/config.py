@@ -100,44 +100,13 @@ class Settings:
     )
 
     # ------------------------------------------------------------------
-    # AWS Bedrock (Claude generation + Titan embeddings)
+    # Local embeddings (sentence-transformers)
     # ------------------------------------------------------------------
-    bedrock_api_key: str = field(
-        default_factory=lambda: os.environ.get("BEDROCK_API_KEY", "")
-    )
-    bedrock_model: str = field(
+    embedding_model: str = field(
         default_factory=lambda: os.environ.get(
-            # Default to Opus because that's the inference profile id
-            # provisioned in this AWS account. Override via env to a
-            # Sonnet/Haiku id (e.g. anthropic.claude-3-5-sonnet-... or
-            # anthropic.claude-3-5-haiku-...) for lower latency once you
-            # confirm the id is enabled with `aws bedrock
-            # list-foundation-models` / `list-inference-profiles`.
-            "BEDROCK_MODEL", "global.anthropic.claude-opus-4-6-v1"
+            "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
     )
-    bedrock_region: str = field(
-        default_factory=lambda: os.environ.get("BEDROCK_REGION", "us-east-1")
-    )
-    bedrock_embedding_model: str = field(
-        default_factory=lambda: os.environ.get(
-            "BEDROCK_EMBEDDING_MODEL", "amazon.titan-embed-text-v2:0"
-        )
-    )
-
-    @property
-    def bedrock_converse_url(self) -> str:
-        return (
-            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
-            f"/model/{self.bedrock_model}/converse"
-        )
-
-    @property
-    def bedrock_embedding_url(self) -> str:
-        return (
-            f"https://bedrock-runtime.{self.bedrock_region}.amazonaws.com"
-            f"/model/{self.bedrock_embedding_model}/invoke"
-        )
 
 
 def get_settings() -> Settings:

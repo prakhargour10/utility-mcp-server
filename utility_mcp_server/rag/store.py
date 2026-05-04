@@ -1,9 +1,9 @@
 """Process-wide singleton accessors for the RAG vector store.
 
-The store is expensive to build (it embeds every chunk via Bedrock Titan),
-so we lazy-load it once per process. If a saved store JSON exists at
-``settings.rag_embeddings_path`` we load that; otherwise we build it from
-the markdown corpus on disk.
+The store is expensive to build (it embeds every chunk via the local
+sentence-transformers model), so we lazy-load it once per process. If a
+saved store JSON exists at ``settings.rag_embeddings_path`` we load that;
+otherwise we build it from the markdown corpus on disk.
 """
 
 from __future__ import annotations

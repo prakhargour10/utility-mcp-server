@@ -1,16 +1,15 @@
 """FAISS dense vector retrieval over the chunked Pine Labs docs corpus.
 
-Embeddings are computed remotely via **Amazon Bedrock Titan Text
-Embeddings v2** (``amazon.titan-embed-text-v2:0``). This keeps the
-container small (no torch / sentence-transformers download), gives sub-
-second cold starts, and fits cleanly on small PaaS hosts like Railway --
-the embedding HTTPS call adds ~100 ms per query.
+Embeddings are computed **locally** via
+``sentence-transformers`` (default model:
+``sentence-transformers/all-MiniLM-L6-v2``, 384-dim). No external API
+calls, no API keys, no network egress at query time.
 
 Pipeline:
 
     docs/doc_list/**/*.md
         -> SentenceSplitter chunking (chunk.py, LlamaIndex; ~1024 tokens)
-            -> Bedrock Titan v2 embeddings (float32[dim], L2-normalized)
+            -> SentenceTransformer embeddings (float32[dim], L2-normalized)
                 -> VectorStore (in-memory list[Chunk] + faiss.IndexFlatIP)
                     -> store.search(query, top_k)
                         -> tools.py / generate.py
@@ -36,7 +35,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
 
-import httpx
 import numpy as np
 
 try:
@@ -53,9 +51,8 @@ from .chunk import Chunk, chunk_documents
 logger = logging.getLogger(__name__)
 
 
-DEFAULT_EMBED_DIM = 1024
-DEFAULT_EMBED_BATCH = 8
-DEFAULT_EMBED_TIMEOUT = 60.0
+DEFAULT_EMBED_DIM = 384
+DEFAULT_EMBED_BATCH = 32
 
 
 # ---------------------------------------------------------------------------
@@ -75,75 +72,88 @@ class SearchHit:
 
 
 # ---------------------------------------------------------------------------
-# Bedrock Titan embedder
+# Local sentence-transformers embedder
 # ---------------------------------------------------------------------------
-class BedrockTitanEmbedder:
-    """Async embedder backed by Amazon Bedrock Titan Text Embeddings v2.
+class LocalSentenceTransformerEmbedder:
+    """Embedder backed by a local ``sentence-transformers`` model.
 
-    Uses the bearer-token auth path (``BEDROCK_API_KEY``) consistent with
-    the rest of this server. Returns ``float32`` numpy vectors that are
-    already L2-normalized (``normalize: true``).
+    The model is loaded lazily on first use and cached on the instance.
+    ``encode`` runs in a worker thread (``asyncio.to_thread``) to keep the
+    public ``async`` API surface unchanged from the previous remote
+    implementation.
     """
+
+    _model_cache: dict[str, Any] = {}
 
     def __init__(
         self,
         settings: Settings | None = None,
         *,
-        dimensions: int = DEFAULT_EMBED_DIM,
-        timeout: float = DEFAULT_EMBED_TIMEOUT,
+        dimensions: int | None = None,
     ) -> None:
         self._settings = settings or get_settings()
-        self._dimensions = int(dimensions)
-        self._timeout = float(timeout)
-        if not self._settings.bedrock_api_key:
-            raise RuntimeError(
-                "BEDROCK_API_KEY is not configured. Set it in the environment "
-                "or .env to enable Bedrock Titan embeddings."
-            )
+        self._model_name = self._settings.embedding_model
+        # Dimensions are determined by the model itself; the optional
+        # argument is accepted for back-compat but ignored unless it
+        # matches the model's native dimension.
+        self._requested_dim = int(dimensions) if dimensions is not None else None
+        self._model: Any = None
+        self._dimensions: int = 0
 
     @property
     def dimensions(self) -> int:
+        if self._dimensions == 0:
+            self._load_model()
         return self._dimensions
 
     @property
     def model(self) -> str:
-        return self._settings.bedrock_embedding_model
+        return self._model_name
 
-    async def embed_one(self, text: str, client: httpx.AsyncClient) -> np.ndarray:
+    def _load_model(self) -> Any:
+        if self._model is not None:
+            return self._model
+        cached = self._model_cache.get(self._model_name)
+        if cached is None:
+            try:
+                from sentence_transformers import SentenceTransformer  # type: ignore
+            except ImportError as exc:  # pragma: no cover - optional dep guard
+                raise RuntimeError(
+                    "sentence-transformers is not installed. "
+                    "Install it with `pip install sentence-transformers`."
+                ) from exc
+            logger.info("Loading local embedding model: %s", self._model_name)
+            cached = SentenceTransformer(self._model_name)
+            self._model_cache[self._model_name] = cached
+        self._model = cached
+        self._dimensions = int(cached.get_sentence_embedding_dimension())
+        if (
+            self._requested_dim is not None
+            and self._requested_dim != self._dimensions
+        ):
+            logger.warning(
+                "Requested embedding dim %d does not match model dim %d; "
+                "using model dim.",
+                self._requested_dim,
+                self._dimensions,
+            )
+        return self._model
+
+    def _encode_sync(self, texts: Sequence[str]) -> np.ndarray:
+        model = self._load_model()
+        arr = model.encode(
+            list(texts),
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        return np.asarray(arr, dtype=np.float32)
+
+    async def embed_one(self, text: str, client: Any = None) -> np.ndarray:
         if not text or not text.strip():
             raise ValueError("Cannot embed empty text.")
-        body = {
-            "inputText": text,
-            "dimensions": self._dimensions,
-            "normalize": True,
-        }
-        headers = {
-            "Authorization": f"Bearer {self._settings.bedrock_api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-        resp = await client.post(
-            self._settings.bedrock_embedding_url,
-            json=body,
-            headers=headers,
-            timeout=self._timeout,
-        )
-        if resp.status_code >= 400:
-            raise RuntimeError(
-                f"Bedrock embedding call failed ({resp.status_code}): "
-                f"{resp.text[:500]}"
-            )
-        data = resp.json()
-        vec = data.get("embedding")
-        if not vec:
-            raise RuntimeError(f"Bedrock response missing 'embedding': {data}")
-        arr = np.asarray(vec, dtype=np.float32)
-        if arr.shape[0] != self._dimensions:
-            raise RuntimeError(
-                f"Unexpected embedding dim: got {arr.shape[0]}, "
-                f"expected {self._dimensions}"
-            )
-        return arr
+        arr = await asyncio.to_thread(self._encode_sync, [text])
+        return arr[0]
 
     async def embed_many(
         self,
@@ -151,32 +161,28 @@ class BedrockTitanEmbedder:
         *,
         batch_size: int = DEFAULT_EMBED_BATCH,
     ) -> np.ndarray:
-        """Embed a list of texts with bounded concurrency."""
         if not texts:
-            return np.zeros((0, self._dimensions), dtype=np.float32)
+            return np.zeros((0, self.dimensions), dtype=np.float32)
 
-        out: list[np.ndarray] = [
-            np.zeros(self._dimensions, dtype=np.float32) for _ in range(len(texts))
-        ]
-        sem = asyncio.Semaphore(max(1, int(batch_size)))
+        batch_size = max(1, int(batch_size))
+        out_chunks: list[np.ndarray] = []
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            arr = await asyncio.to_thread(self._encode_sync, batch)
+            out_chunks.append(arr)
+            done = min(start + batch_size, len(texts))
+            logger.info(
+                "embedded %d/%d chunks (model=%s, dim=%d)",
+                done,
+                len(texts),
+                self._model_name,
+                self.dimensions,
+            )
+        return np.vstack(out_chunks).astype(np.float32, copy=False)
 
-        async with httpx.AsyncClient() as client:
 
-            async def _one(i: int, txt: str) -> None:
-                async with sem:
-                    out[i] = await self.embed_one(txt, client)
-                    if (i + 1) % 25 == 0 or i == len(texts) - 1:
-                        logger.info(
-                            "embedded %d/%d chunks (model=%s, dim=%d)",
-                            i + 1,
-                            len(texts),
-                            self.model,
-                            self._dimensions,
-                        )
-
-            await asyncio.gather(*(_one(i, t) for i, t in enumerate(texts)))
-
-        return np.vstack(out).astype(np.float32, copy=False)
+# Backwards-compat alias so any external import keeps working.
+BedrockTitanEmbedder = LocalSentenceTransformerEmbedder
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +199,7 @@ class VectorStore:
     dim: int = DEFAULT_EMBED_DIM
     _index: Any = field(default=None, init=False, repr=False)
     _index_size: int = field(default=0, init=False, repr=False)
-    _embedder: BedrockTitanEmbedder | None = field(
+    _embedder: LocalSentenceTransformerEmbedder | None = field(
         default=None, init=False, repr=False
     )
 
@@ -246,15 +252,14 @@ class VectorStore:
         )
         return index
 
-    def _get_embedder(self) -> BedrockTitanEmbedder:
+    def _get_embedder(self) -> LocalSentenceTransformerEmbedder:
         if self._embedder is None:
-            self._embedder = BedrockTitanEmbedder(dimensions=self.dim)
+            self._embedder = LocalSentenceTransformerEmbedder(dimensions=self.dim)
         return self._embedder
 
     async def embed_query(self, query_text: str) -> np.ndarray:
         embedder = self._get_embedder()
-        async with httpx.AsyncClient() as client:
-            return await embedder.embed_one(query_text, client)
+        return await embedder.embed_one(query_text)
 
     async def search(self, query_text: str, top_k: int = 5) -> list[SearchHit]:
         """Embed ``query_text`` and run FAISS top-k inner-product search."""
@@ -383,10 +388,13 @@ async def build_vector_store(
     if not chunks:
         return store
 
-    embedder = BedrockTitanEmbedder(settings, dimensions=embed_dim)
+    embedder = LocalSentenceTransformerEmbedder(settings, dimensions=embed_dim)
     vectors = await embedder.embed_many(
         [c.text for c in chunks], batch_size=embed_batch
     )
+    # Reconcile store dim with the model's native dim if they differ.
+    if vectors.size and vectors.shape[1] != store.dim:
+        store = VectorStore(dim=int(vectors.shape[1]))
     store.extend(chunks, vectors)
     return store
 
@@ -487,6 +495,7 @@ if __name__ == "__main__":  # pragma: no cover
 
 
 __all__ = [
+    "LocalSentenceTransformerEmbedder",
     "BedrockTitanEmbedder",
     "SearchHit",
     "VectorStore",

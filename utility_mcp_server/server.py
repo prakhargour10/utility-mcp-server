@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from mcp.server.fastmcp import FastMCP
@@ -30,20 +31,15 @@ def _build_mcp(settings: Settings) -> FastMCP:
     mcp = FastMCP(
         name="utility-mcp-server",
         instructions=(
-            "A utility MCP server providing Pine Labs SDK documentation "
-            "served from the local docs bundle, plus SDK download links."
+            "A utility MCP server providing Pine Labs SDK download links "
+            "and RAG-grounded answers over the official documentation."
         ),
         transport_security=TransportSecuritySettings(
             enable_dns_rebinding_protection=True,
             allowed_hosts=settings.allowed_hosts,
         ),
     )
-    tools.register(
-        mcp,
-        settings.docs_dir,
-        settings.sdk_dir,
-        settings.sdk_download_base_url,
-    )
+    tools.register(mcp, settings)
     return mcp
 
 
@@ -102,7 +98,9 @@ def _wrap_session_not_found(asgi_app):
                     headers.append((b"content-length", str(len(body)).encode("ascii")))
                     start = {**start, "headers": headers}
                     await send(start)
-                    await send({"type": "http.response.body", "body": body, "more_body": False})
+                    await send(
+                        {"type": "http.response.body", "body": body, "more_body": False}
+                    )
                 else:
                     if state["start"] is not None:
                         await send(state["start"])
@@ -122,10 +120,32 @@ def build_app(settings: Settings | None = None):
     settings = settings or get_settings()
     _configure_logging(settings.log_level)
     mcp = _build_mcp(settings)
-    asgi_app = mcp.streamable_http_app()
-    return _wrap_session_not_found(asgi_app)
+    _warmup_vector_store(settings)
+    return _wrap_session_not_found(mcp.streamable_http_app())
+
+
+def _warmup_vector_store(settings: Settings) -> None:
+    """Eager-load the persisted RAG store at startup.
+
+    Loading a saved ``embeddings.json`` is just a synchronous file read, so
+    paying that cost during process boot keeps the first user request fast.
+    Skipped when no saved store exists, since building from scratch would
+    load the local embedding model and significantly delay startup.
+    """
+    if not settings.rag_embeddings_path.exists():
+        logger.info(
+            "Skipping vector store warmup — no saved store at %s",
+            settings.rag_embeddings_path,
+        )
+        return
+    try:
+        from .rag.store import get_vector_store
+
+        asyncio.run(get_vector_store(settings))
+        logger.info("Vector store warmup complete")
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("Vector store warmup failed: %s", exc)
 
 
 # Module-level ASGI app — used by uvicorn target ``utility_mcp_server.server:app``.
 app = build_app()
-

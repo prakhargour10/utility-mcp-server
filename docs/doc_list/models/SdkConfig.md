@@ -14,14 +14,14 @@ SDK-wide construction config. Holds infrastructure config only — merchant iden
 | `log_level` | `LogLevel?` | no | Default Info. |
 | `transport` | `TransportType?` | no | Initial transport. Null = no transport selected. |
 | `app_to_app` | `AppToAppConfig?` | conditional | Required iff transport == AppToApp. |
-| `application_id` | `string?` | conditional | Pinelabs-provisioned. Required for AppToApp DoTxn (MethodId=1001). Forwarded as Header.ApplicationId. **Sandbox/test value: `"1001"`** (use this in dev/QA against test terminals; production value is allocated per-merchant by Pinelabs). |
+| `application_id` | `string?` | conditional | Pinelabs-provisioned. Required for AppToApp DoTxn (MethodId=1001). Forwarded as Header.ApplicationId. |
 | `cloud` | `CloudConfig?` | conditional | Required iff transport == Cloud. |
 | `pad_controller` | `PadControllerConfig?` | conditional | Honoured iff transport == PadController. |
 
 ## MUST
 
 - Validate ranges yourself before calling — the SDK throws `InvalidInput` otherwise.
-- For AppToApp, supply both `app_to_app` and `application_id`. In sandbox/dev, hardcode `application_id = "1001"`; in production, source it from a non-VCS secrets file (Android: `BuildConfig.PINELABS_APP_ID`).
+- For AppToApp, supply both `app_to_app` and `application_id`.
 
 ## MUST NOT
 

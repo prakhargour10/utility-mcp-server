@@ -6,6 +6,25 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv as _load_dotenv
+except ImportError:  # pragma: no cover - optional dependency
+    _load_dotenv = None
+
+
+# Repository root: <repo>/utility_mcp_server/config.py -> parents[1]
+REPO_ROOT: Path = Path(__file__).resolve().parents[1]
+
+# Load .env from the repo root (and the current working directory as a
+# fallback) the first time this module is imported. Existing OS env vars
+# always win over .env values.
+if _load_dotenv is not None:
+    _env_file = REPO_ROOT / ".env"
+    if _env_file.exists():
+        _load_dotenv(_env_file, override=False)
+    else:
+        _load_dotenv(override=False)
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
@@ -17,25 +36,11 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _env_float(name: str, default: float) -> float:
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return default
-    try:
-        return float(raw)
-    except ValueError:
-        return default
-
-
 def _env_list(name: str, default: list[str]) -> list[str]:
     raw = os.environ.get(name)
     if not raw:
         return list(default)
     return [item.strip() for item in raw.split(",") if item.strip()]
-
-
-# Repository root: <repo>/utility_mcp_server/config.py -> parents[1]
-REPO_ROOT: Path = Path(__file__).resolve().parents[1]
 
 
 @dataclass(frozen=True)
@@ -47,24 +52,8 @@ class Settings:
     port: int = field(default_factory=lambda: _env_int("PORT", 8000))
     log_level: str = field(default_factory=lambda: os.environ.get("LOG_LEVEL", "INFO"))
 
-    # Local Pine Labs documentation bundle. The bundle layout is:
-    #   <docs_dir>/get_documentation_list.json   <- master registry
-    #   <docs_dir>/doc_list/{apis,concepts,models,languages}/*.md
-    #   <docs_dir>/sdk_list/*.{zip,aar,jar,...}
-    docs_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get("PINELABS_DOCS_DIR", str(REPO_ROOT / "docs"))
-        )
-    )
-
-    # SDK download artifacts (served from local repo, under docs/sdk_list).
-    sdk_dir: Path = field(
-        default_factory=lambda: Path(
-            os.environ.get(
-                "PINELABS_SDK_DIR", str(REPO_ROOT / "docs" / "sdk_list")
-            )
-        )
-    )
+    # SDK download artifacts (still served from local repo)
+    sdk_dir: Path = field(default_factory=lambda: REPO_ROOT / "docs" / "sdk_list")
     sdk_download_base_url: str = field(
         default_factory=lambda: os.environ.get(
             "SDK_DOWNLOAD_BASE_URL",
@@ -81,6 +70,41 @@ class Settings:
                 "localhost:*",
                 "127.0.0.1:*",
             ],
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # RAG (Retrieval-Augmented Generation)
+    # ------------------------------------------------------------------
+    # Local directory containing the markdown documentation corpus. This
+    # is the single source of truth for chunking + embedding -- docs are
+    # committed to the repo under ``docs/`` rather than fetched at build
+    # time.
+    rag_raw_docs_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get(
+                "RAG_RAW_DOCS_DIR",
+                str(REPO_ROOT / "docs" / "doc_list"),
+            )
+        )
+    )
+    # Persisted vector store output. Kept under ``data/`` (which is
+    # gitignored) so embeddings rebuilds don't pollute the docs corpus.
+    rag_embeddings_path: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get(
+                "RAG_EMBEDDINGS_PATH",
+                str(REPO_ROOT / "data" / "embeddings.json"),
+            )
+        )
+    )
+
+    # ------------------------------------------------------------------
+    # Local embeddings (sentence-transformers)
+    # ------------------------------------------------------------------
+    embedding_model: str = field(
+        default_factory=lambda: os.environ.get(
+            "EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2"
         )
     )
 

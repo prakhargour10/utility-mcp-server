@@ -27,3 +27,13 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local secrets / env
+.env
+.env.local
+.env.*.local
+
+# RAG pipeline artifacts (regenerated via the rag-rebuild CLI).
+# The markdown corpus lives under docs/ and is checked in; only the
+# generated embeddings.json + any scratch files under data/ are ignored.
+data/

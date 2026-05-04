@@ -265,22 +265,7 @@
       "Android: include the <queries> entry for the upstream Pinelabs PoS package (default com.pinelabs.masterapp; OEM-specific — see concepts/oem-terminal-registry.md) and verify with the merchant's terminal vendor before shipping.",
       "Android: do NOT manually copy ProGuard -keep rules — the AAR ships consumer-rules.pro that auto-applies them.",
       "Android: combine packagingOptions { jniLibs.pickFirsts += '**/libc++_shared.so' } when consuming any other AAR that bundles the C++ runtime (Compose UI does, indirectly, on some toolchains)."
-    ],
-    "sandbox_values": {
-      "_comment": "Stable test values for dev/QA against Pinelabs test terminals. NEVER use these in production — production values are merchant-specific and provisioned by Pinelabs.",
-      "application_id": {
-        "value": "1001",
-        "scope": "AppToApp transport (SdkConfig.application_id)",
-        "use_when": "transport == AppToApp AND environment is dev/QA against a Pinelabs test terminal",
-        "production_guidance": "Source from a non-VCS secret store. On Android, populate BuildConfig.PINELABS_APP_ID via ~/.gradle/gradle.properties or a CI secret. Fail-fast at configure time if unset.",
-        "citations": [
-          "models/SdkConfig.md § Fields → application_id",
-          "apis/constructor.md § AppToApp guidance",
-          "languages/android/integration.md § applicationId provisioning",
-          "languages/android/setup.md § gradle.properties"
-        ]
-      }
-    }
+    ]
   },
   "tools": {
     "get_documentation_list": {

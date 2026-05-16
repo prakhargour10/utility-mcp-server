@@ -75,60 +75,81 @@ def recommend_endpoint(req: RecommendRequest) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.post("/recommend-and-push")
-def recommend_and_push_endpoint(
-    req: RecommendAndPushRequest,
-    background_tasks: BackgroundTasks,
-) -> dict[str, Any]:
-    """Recommend a campaign and asynchronously push it to the terminal via TMS.
-
-    Returns immediately. The 3-step TMS push (resource group -> terminal group ->
-    push-task) runs in the background; results are visible in server logs only.
-    """
-    request_id = f"req_{uuid.uuid4().hex[:12]}"
-    logger = logging.getLogger("api.recommend_and_push")
+async def _recommend_and_push_job(
+    *,
+    request_id: str,
+    hardware_id: str,
+    model_name: str,
+    description: str,
+) -> None:
+    """Background job: run LLM recommend + TMS push. Never raises."""
+    job_logger = logging.getLogger("api.recommend_and_push.bg")
+    job_logger.info(
+        "[%s] bg start hardware_id=%s model=%s",
+        request_id, hardware_id, model_name,
+    )
 
     try:
-        result = recommend(model_name=req.model_name, description=req.description)
+        result = recommend(model_name=model_name, description=description)
     except Exception as exc:
-        logger.exception("[%s] recommend failed: %s", request_id, exc)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        job_logger.exception("[%s] recommend failed: %s", request_id, exc)
+        return
 
     campaign = result.get("recommended_campaign") or {}
     campaign_id = campaign.get("campaign_id", "")
 
     if not campaign_id:
-        logger.info(
-            "[%s] no relevant campaign found hardware_id=%s model=%s",
-            request_id, req.hardware_id, req.model_name,
+        job_logger.info(
+            "[%s] no relevant campaign found hardware_id=%s model=%s reason=%s",
+            request_id, hardware_id, model_name,
+            result.get("selection_reason", ""),
         )
-        return {
-            "request_id": request_id,
-            "campaign_found": False,
-            "message": "No relevant campaign found",
-            "selection_reason": result.get("selection_reason", ""),
-        }
+        return
 
-    # Schedule async push; never blocks the response.
-    background_tasks.add_task(
-        push_campaign_to_terminal,
+    job_logger.info(
+        "[%s] campaign matched campaign_id=%s mongo_id=%s reason=%s",
+        request_id, campaign_id, campaign.get("mongo_id", ""),
+        result.get("selection_reason", ""),
+    )
+
+    await push_campaign_to_terminal(
         request_id=request_id,
-        hardware_id=req.hardware_id,
+        hardware_id=hardware_id,
         campaign=campaign,
     )
 
+
+@app.post("/recommend-and-push")
+def recommend_and_push_endpoint(
+    req: RecommendAndPushRequest,
+    background_tasks: BackgroundTasks,
+) -> dict[str, Any]:
+    """Acknowledge instantly; run LLM recommend + TMS push in the background.
+
+    Returns the moment the request is received. The LLM selection and the
+    3-step TMS push (resource group -> terminal group -> push-task) both run
+    in the background; results are visible in server logs only (keyed by
+    request_id).
+    """
+    request_id = f"req_{uuid.uuid4().hex[:12]}"
+    logger = logging.getLogger("api.recommend_and_push")
+
     logger.info(
-        "[%s] queued push hardware_id=%s campaign_id=%s mongo_id=%s",
-        request_id, req.hardware_id, campaign_id, campaign.get("mongo_id", ""),
+        "[%s] request received hardware_id=%s model=%s",
+        request_id, req.hardware_id, req.model_name,
+    )
+
+    background_tasks.add_task(
+        _recommend_and_push_job,
+        request_id=request_id,
+        hardware_id=req.hardware_id,
+        model_name=req.model_name,
+        description=req.description,
     )
 
     return {
         "request_id": request_id,
-        "campaign_found": True,
-        "campaign_id": campaign_id,
-        "campaign_name": campaign.get("campaign_name", ""),
-        "message": "Campaign matched. MQTT push dispatched asynchronously.",
-        "push_status": "queued",
-        "selection_reason": result.get("selection_reason", ""),
+        "status": "queued",
+        "message": "Request accepted. Recommendation and push are running in the background.",
     }
 

@@ -1,0 +1,9 @@
+{
+  "servers": {
+    "campaign-recommendation": {
+      "type": "stdio",
+      "command": "python",
+      "args": ["${workspaceFolder}/server.py"]
+    }
+  }
+}
